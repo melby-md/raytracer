@@ -9,9 +9,11 @@
 constexpr double INF = std::numeric_limits<double>::infinity();
 
 struct Material {
-	double smoothness;
-	Vec3 reflection_color;
-	Vec3 emission_color;
+	double roughness;
+	Vec3 albedo;
+	Vec3 emission;
+
+	bool metallic;
 };
 
 enum class Geometry {
@@ -19,28 +21,43 @@ enum class Geometry {
 	PLANE
 };
 
-struct Object {
-	Geometry type;
+struct Sphere {
 	int material_idx;
-	Vec3 v;
-	double s;
+
+	Vec3 center;
+	double radius;
+};
+
+struct Plane {
+	int material_idx;
+
+	Vec3 normal;
+	double d;
+};
+
+struct HitInfo {
+	Vec3 hit_point;
+	Vec3 normal;
+	int material_idx;
 };
 
 struct Ray {
 	Vec3 origin, direction;
 };
 
-constexpr int MAX_OBJECTS = 256;
+constexpr int MAX_OBJECTS = 64;
 constexpr int MAX_MATERIALS = 64;
 
 struct World {
-	int object_count;
-	Object objects[MAX_OBJECTS];
+	int sphere_count;
+	Sphere spheres[MAX_OBJECTS];
+
+	int plane_count;
+	Plane planes[MAX_OBJECTS];
 
 	int material_count;
 	Material materials[MAX_MATERIALS];
 
-	Vec3 sun_direction;
 	Vec3 sun_color;
 };
 
@@ -52,10 +69,10 @@ double LinearToGamma(double linear_component)
     return 0;
 }
 
-double Rand(double fMin, double fMax)
+double Rand(double min, double max)
 {
     double f = (double)rand() / RAND_MAX;
-    return fMin + f * (fMax - fMin);
+    return min + f * (max - min);
 }
 
 Vec3 RandomUnitVector() {
@@ -67,12 +84,19 @@ Vec3 RandomUnitVector() {
 	}
 }
 
-double HitSphere(Object *sphere, Ray ray)
+double Fresnel(double cosine, double refraction_index) {
+	// Use Schlick's approximation for reflectance.
+	auto r0 = (1 - refraction_index) / (1 + refraction_index);
+	r0 = r0*r0;
+	return r0 + (1-r0)*pow((1 - cosine), 5);
+}
+
+double HitSphere(Sphere *sphere, Ray ray)
 {
-	Vec3 oc = sphere->v - ray.origin;
+	Vec3 oc = sphere->center - ray.origin;
 	double a = Dot(ray.direction, ray.direction);
 	double h = Dot(ray.direction, oc);
-	double c = Dot(oc, oc) - sphere->s*sphere->s;
+	double c = Dot(oc, oc) - sphere->radius*sphere->radius;
 	double delta = h*h - a*c;
 
 	if (delta < .001)
@@ -90,56 +114,55 @@ double HitSphere(Object *sphere, Ray ray)
 	return distance;
 }
 
-double HitPlane(Object *plane, Ray ray)
+double HitPlane(Plane *plane, Ray ray)
 {
-	double denominator = Dot(plane->v, ray.direction);
-	if (denominator < .001)
+	double denominator = Dot(plane->normal, ray.direction);
+	if (fabs(denominator) < .001)
 		return -1;
 
-	double distance = (-plane->s - Dot(ray.origin, plane->v)) / denominator;
+	double distance = (plane->d - Dot(ray.origin, plane->normal)) / denominator;
 	if (distance < .001)
 		return -1;
 
 	return distance;
 }
 
-Vec3 GetNormal(Object *object, Vec3 hit_point)
+bool NearestHit(World *world, Ray ray, HitInfo *info)
 {
-	switch (object->type) {
-	case Geometry::PLANE:
-		return -object->v;
-	case Geometry::SPHERE:
-		return Normalize(hit_point - object->v);
-	}
+	bool hit = false;
+	double min_distance = INF;
 
-	return {0, 0, 0};
-}
+	for (int i = 0; i < world->plane_count; i++) {
+		Plane *plane = &world->planes[i];
 
-Object *NearestObject(World *world, Ray ray, double *t)
-{
-	Object *nearest = nullptr;
-	double min = INF;
+		double t = HitPlane(plane, ray);
 
-	for (int i = 0; i < world->object_count; i++) {
-		Object *obj = &world->objects[i];
-		double distance = -1;
+		if (t > 0 && t < min_distance) {
+			info->hit_point = ray.origin + ray.direction * t;
+			info->normal = plane->normal;
+			info->material_idx = plane->material_idx;
 
-		switch (obj->type) {
-		case Geometry::PLANE:
-			distance = HitPlane(obj, ray);
-			break;
-		case Geometry::SPHERE:
-			distance = HitSphere(obj, ray);
-		}
-
-		if (distance > 0 && distance < min) {
-			min = distance;
-			nearest = obj;
+			min_distance = t;
+			hit = true;
 		}
 	}
 
-	*t = min;
-	return nearest;
+	for (int i = 0; i < world->sphere_count; i++) {
+		Sphere *sphere = &world->spheres[i];
+
+		double t = HitSphere(sphere, ray);
+
+		if (t > 0 && t < min_distance) {
+			info->hit_point = ray.origin + ray.direction * t;
+			info->normal = (info->hit_point - sphere->center) / sphere->radius;
+			info->material_idx = sphere->material_idx;
+
+			min_distance = t;
+			hit = true;
+		}
+	}
+
+	return hit;
 }
 
 Vec3 RayTrace(World *world, Ray ray)
@@ -150,39 +173,59 @@ Vec3 RayTrace(World *world, Ray ray)
 
 	for (int i = 0; i < max_bounces; i++)
 	{
-		double t;
-		Object *obj = NearestObject(world, ray, &t);
+		HitInfo hit;
+		bool did_hit = NearestHit(world, ray, &hit);
 
 		// hit the sky
-		if (obj == nullptr) {
+		if (!did_hit) {
 			color += attenuation * world->sun_color;
 			break;
 		}
 
-		Vec3 hit_point = ray.origin + ray.direction*t;
-		Vec3 normal = GetNormal(obj, hit_point);
+		bool front_face = Dot(ray.direction, hit.normal) < 0;
+		if (!front_face)
+			hit.normal = -hit.normal;
 
-		Vec3 scattered = Normalize(normal + RandomUnitVector());
-		Vec3 reflection = Normalize(Reflect(ray.direction, normal));
+		Material mat = world->materials[hit.material_idx];
 
-		Material mat = world->materials[obj->material_idx];
-		Vec3 fuzzy_reflection = Lerp(scattered, reflection, mat.smoothness);
+		Vec3 next_direction;
+		if (mat.metallic) {
+			Vec3 reflection = Normalize(Reflect(ray.direction, hit.normal));
+			Vec3 fuzz = RandomUnitVector() * mat.roughness;
 
-		color += attenuation * mat.emission_color;
-		attenuation *= mat.reflection_color;
+			next_direction = reflection + fuzz;
 
-		ray = {hit_point, fuzzy_reflection};
+			// Absorb rays pointing back
+			if (Dot(hit.normal, next_direction) < 0)
+				return {};
+
+		} else { // Lambertian
+			next_direction = hit.normal + RandomUnitVector();
+
+			// Catch the unlucky ones
+			if (NearZero(next_direction))
+				next_direction = hit.normal;
+		}
+
+		ray = {hit.hit_point, next_direction};
+
+		color += attenuation * mat.emission;
+		attenuation *= mat.albedo;
 	}
 
 	return color;
 }
 
-int AddMaterial(World *world, Vec3 color, Vec3 emission, double smoothness)
+int AddMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness, bool metallic)
 {
+	if (world->material_count >= MAX_MATERIALS)
+		Panic("Too much materials");
+
 	world->materials[world->material_count] = {
-		smoothness,
-		color,
-		emission
+		roughness,
+		albedo,
+		emission,
+		metallic
 	};
 
 	return world->material_count++;
@@ -190,8 +233,10 @@ int AddMaterial(World *world, Vec3 color, Vec3 emission, double smoothness)
 
 void AddSphere(World *world, Vec3 pos, double radius, int material_idx)
 {
-	world->objects[world->object_count++] = {
-		Geometry::SPHERE,
+	if (world->sphere_count >= MAX_OBJECTS)
+		Panic("Too much spheres");
+
+	world->spheres[world->sphere_count++] = {
 		material_idx,
 		pos,
 		radius
@@ -200,8 +245,10 @@ void AddSphere(World *world, Vec3 pos, double radius, int material_idx)
 
 void AddPlane(World *world, Vec3 normal, double d, int material_idx)
 {
-	world->objects[world->object_count++] = {
-		Geometry::PLANE,
+	if (world->plane_count >= MAX_OBJECTS)
+		Panic("Too much planes");
+
+	world->planes[world->plane_count++] = {
 		material_idx,
 		normal,
 		d
@@ -212,18 +259,17 @@ int main()
 {
 	World world = {};
 
-	int gray = AddMaterial(&world, {.7, .7, .7}, {0, 0, 0}, 0);
-	int red = AddMaterial(&world, {.8, 0, 0}, {0, 0, 0}, 0);
-	int light = AddMaterial(&world, {0, 0, 0}, {5, 0, 5}, 0);
-	int mirror = AddMaterial(&world, {.9, .9, .9}, {0, 0, 0}, .98);
+	int gray = AddMaterial(&world, {.7, .7, .7}, {0, 0, 0}, 0, false);
+	int red = AddMaterial(&world, {.8, 0, 0}, {0, 0, 0}, 0, false);
+	int light = AddMaterial(&world, {0, 0, 0}, {.9, 0, .9}, 0, false);
+	int mirror = AddMaterial(&world, {.9, .9, .9}, {0, 0, 0}, .01, true);
 
 	AddSphere(&world, {0, 0, 1}, 2, mirror);
-	AddSphere(&world, {0, 3, 0}, .5, red);
+	AddSphere(&world, {0, 3, -1.5}, .5, red);
 	AddSphere(&world, {-1, -3, 0}, 1, light);
-	AddPlane(&world, {0, 0, -1}, -2, gray);
+	AddPlane(&world, {0, 0, -1}, 2, gray);
 
-	world.sun_direction = {-5, 0, 0};
-	world.sun_color = {1, 1, 1};
+	world.sun_color = {.5, .5, .5};
 
 	int width = 630, height = 340;
 	// 90 degrees
@@ -235,7 +281,7 @@ int main()
 	double viewport_height = 2 * tan(fov/2) * viewport_distance;
 	double viewport_width = viewport_height * aspect_ratio;
 
-	Vec3 looking_at = world.objects[0].v;
+	Vec3 looking_at = world.spheres[0].center;
 
 	Vec3 forward = Normalize(looking_at - camera_position);
 	Vec3 right = Normalize(Cross(forward, {0, 0, 1}));
