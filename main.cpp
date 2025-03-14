@@ -9,16 +9,13 @@
 constexpr double INF = std::numeric_limits<double>::infinity();
 
 struct Material {
-	double roughness;
 	Vec3 albedo;
 	Vec3 emission;
+	double roughness;
+	double ior;
 
 	bool metallic;
-};
-
-enum class Geometry {
-	SPHERE,
-	PLANE
+	bool transparent;
 };
 
 struct Sphere {
@@ -189,7 +186,29 @@ Vec3 RayTrace(World *world, Ray ray)
 		Material mat = world->materials[hit.material_idx];
 
 		Vec3 next_direction;
-		if (mat.metallic) {
+		Vec3 albedo;
+		if (mat.transparent) {
+
+			double ri = front_face ? (1/mat.ior) : mat.ior;
+
+			Vec3 unit_direction = Normalize(ray.direction);
+
+			double cos_theta = Min(Dot(-unit_direction, hit.normal), 1);
+			double sin_theta = sqrt(1 - cos_theta*cos_theta);
+
+			bool cannot_refract = ri * sin_theta > 1.0;
+
+			if (cannot_refract || Fresnel(cos_theta, ri) > Rand(0, 1)) {
+				albedo = {1, 1, 1};
+				next_direction = Reflect(unit_direction, hit.normal);
+			} else {
+				albedo = mat.albedo;
+				next_direction = Refract(unit_direction, hit.normal, ri);
+			}
+
+		} else if (mat.metallic) {
+			albedo = mat.albedo;
+
 			Vec3 reflection = Normalize(Reflect(ray.direction, hit.normal));
 			Vec3 fuzz = RandomUnitVector() * mat.roughness;
 
@@ -197,9 +216,11 @@ Vec3 RayTrace(World *world, Ray ray)
 
 			// Absorb rays pointing back
 			if (Dot(hit.normal, next_direction) < 0)
-				return {};
+				return color;
 
 		} else { // Lambertian
+			albedo = mat.albedo;
+
 			next_direction = hit.normal + RandomUnitVector();
 
 			// Catch the unlucky ones
@@ -210,25 +231,42 @@ Vec3 RayTrace(World *world, Ray ray)
 		ray = {hit.hit_point, next_direction};
 
 		color += attenuation * mat.emission;
-		attenuation *= mat.albedo;
+		attenuation *= albedo;
 	}
 
 	return color;
 }
 
-int AddMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness, bool metallic)
+int AddMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness, double ior, bool metallic, bool transparent)
 {
 	if (world->material_count >= MAX_MATERIALS)
 		Panic("Too much materials");
 
 	world->materials[world->material_count] = {
-		roughness,
 		albedo,
 		emission,
-		metallic
+		roughness,
+		ior,
+		metallic,
+		transparent
 	};
 
 	return world->material_count++;
+}
+
+int AddLambertianMaterial(World *world, Vec3 albedo, Vec3 emission)
+{
+	return AddMaterial(world, albedo, emission, 0, 0, false, false);
+}
+
+int AddMetallicMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness)
+{
+	return AddMaterial(world, albedo, emission, roughness, 0, true, false);
+}
+
+int AddTransparentMaterial(World *world, Vec3 albedo, Vec3 emission, double ior)
+{
+	return AddMaterial(world, albedo, emission, 0, ior, false, true);
 }
 
 void AddSphere(World *world, Vec3 pos, double radius, int material_idx)
@@ -259,12 +297,12 @@ int main()
 {
 	World world = {};
 
-	int gray = AddMaterial(&world, {.7, .7, .7}, {0, 0, 0}, 0, false);
-	int red = AddMaterial(&world, {.8, 0, 0}, {0, 0, 0}, 0, false);
-	int light = AddMaterial(&world, {0, 0, 0}, {.9, 0, .9}, 0, false);
-	int mirror = AddMaterial(&world, {.9, .9, .9}, {0, 0, 0}, .01, true);
+	int gray = AddLambertianMaterial(&world, {.7, .7, .7}, {0, 0, 0});
+	int red = AddLambertianMaterial(&world, {.8, 0, 0}, {0, 0, 0});
+	int light = AddLambertianMaterial(&world, {0, 0, 0}, {.9, 0, .9});
+	int glass = AddTransparentMaterial(&world, {1, 1, 1}, {0, 0, 0}, 1.5);
 
-	AddSphere(&world, {0, 0, 1}, 2, mirror);
+	AddSphere(&world, {0, 0, 1}, 2, glass);
 	AddSphere(&world, {0, 3, -1.5}, .5, red);
 	AddSphere(&world, {-1, -3, 0}, 1, light);
 	AddPlane(&world, {0, 0, -1}, 2, gray);

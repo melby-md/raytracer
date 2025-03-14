@@ -110,6 +110,15 @@ static inline Vec3 Reflect(Vec3 v, Vec3 n)
 	return v - 2 * Dot(v, n) * n;
 }
 
+static inline Vec3 Refract(Vec3 v, Vec3 n, double eta)
+{
+	double k = 1 - eta * eta * (1 - Dot(n, v) * Dot(n, v));
+	if (k < 0)
+		return {};
+	else
+		return eta * v - (eta * Dot(n, v) + sqrt(k)) * n;
+}
+
 bool NearZero(Vec3 v)
 {
 	double s = 1e-8;
