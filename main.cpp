@@ -342,7 +342,11 @@ int main()
 
 	int n_samples = 100;
 
+	double percent_row = 100 / (double)height;
+
 	for (int v = 0; v < height; v++) {
+		Log("Raytracing... %.0f%%\r", percent_row * v);
+
 		for (int u = 0; u < width; u++) {
 			Vec3 color = {};
 			for (int i = 0; i < n_samples; i++) {
@@ -373,6 +377,7 @@ int main()
 			image_data[pixel_pos + 0] = ib;
 		}
 	}
+	Log("Raytracing... 100%%\n");
 
 	WriteBMP("image.bmp", width, height, image_data);
 

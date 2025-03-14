@@ -26,7 +26,8 @@
 
 #define _log(level, ...) fprintf(stderr, level ":" __FILE__ ":" xstr(__LINE__) ": " __VA_ARGS__)
 #define Error(...) _log("ERROR", __VA_ARGS__)
-#define Log(...) _log("INFO", __VA_ARGS__)
+#define Debug(...) _log("DEBUG", __VA_ARGS__)
+#define Log(...) fprintf(stderr, __VA_ARGS__)
 
 #if __GNUC__
 #  define Break() __builtin_unreachable()
