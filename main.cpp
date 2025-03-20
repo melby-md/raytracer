@@ -27,8 +27,7 @@ struct Sphere {
 
 struct Plane {
 	int material_idx;
-
-	Vec3 normal;
+Vec3 normal;
 	double d;
 };
 
@@ -58,12 +57,11 @@ struct World {
 	Vec3 sun_color;
 };
 
-double LinearToGamma(double linear_component)
+double LinearToGamma(double color, double exposure)
 {
-    if (linear_component > 0)
-        return sqrt(linear_component);
-
-    return 0;
+	double gamma = 2.2;
+	double mapped = 1. - exp(-color * exposure);
+	return pow(mapped, 1. / gamma);
 }
 
 double Rand(double min, double max)
@@ -299,7 +297,7 @@ int main()
 
 	int gray = AddLambertianMaterial(&world, {.7, .7, .7}, {0, 0, 0});
 	int red = AddLambertianMaterial(&world, {.8, 0, 0}, {0, 0, 0});
-	int light = AddLambertianMaterial(&world, {0, 0, 0}, {.9, 0, .9});
+	int light = AddLambertianMaterial(&world, {0, 0, 0}, {9, 9, 9});
 	int glass = AddTransparentMaterial(&world, {1, 1, 1}, {0, 0, 0}, 1.5);
 
 	AddSphere(&world, {0, 0, 1}, 2, glass);
@@ -310,6 +308,7 @@ int main()
 	world.sun_color = {.5, .5, .5};
 
 	int width = 630, height = 340;
+	double exposure = 1.;
 	// 90 degrees
 	double fov = M_PI/2;
 	Vec3 camera_position = {-4, 3, 2};
@@ -362,9 +361,9 @@ int main()
 
 			color /= n_samples;
 
-			double r = LinearToGamma(color.x);
-			double g = LinearToGamma(color.y);
-			double b = LinearToGamma(color.z);
+			double r = LinearToGamma(color.x, exposure);
+			double g = LinearToGamma(color.y, exposure);
+			double b = LinearToGamma(color.z, exposure);
 
 			int pixel_pos = (v * width + u) * 3;
 
