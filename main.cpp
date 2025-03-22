@@ -27,7 +27,7 @@ struct Sphere {
 
 struct Plane {
 	int material_idx;
-Vec3 normal;
+	Vec3 normal;
 	double d;
 };
 
@@ -70,7 +70,8 @@ double Rand(double min, double max)
     return min + f * (max - min);
 }
 
-Vec3 RandomUnitVector() {
+Vec3 RandomUnitVector()
+{
 	for (;;) {
 		Vec3 p = {Rand(-1, 1), Rand(-1, 1), Rand(-1, 1)};
 		double lensq = Length2(p);
@@ -79,11 +80,47 @@ Vec3 RandomUnitVector() {
 	}
 }
 
-double Fresnel(double cosine, double refraction_index) {
+double Fresnel(double cosine, double refraction_index)
+{
 	// Use Schlick's approximation for reflectance.
 	auto r0 = (1 - refraction_index) / (1 + refraction_index);
 	r0 = r0*r0;
 	return r0 + (1-r0)*pow((1 - cosine), 5);
+}
+
+Vec3 TransformHemisphere(Vec3 v, Vec3 n)
+{
+	Vec3 z_axis = n;
+	Vec3 a = (fabs(z_axis.x) > .9) ? Vec3 {0, 1, 0} : Vec3{1, 0, 0};
+	Vec3 y_axis = Normalize(Cross(z_axis, a));
+	Vec3 x_axis = Cross(z_axis, y_axis);
+
+	return (v.x * x_axis) + (v.y * y_axis) + (v.z * z_axis);
+}
+
+Vec3 LambertianBRDF(Vec3 albedo)
+{
+	return albedo / M_PI;
+}
+
+double CosineWeightedPDF(Vec3 v)
+{
+	return v.z / M_PI;
+}
+
+Vec3 CosineWeightedSample()
+{
+	double r1 = Rand(0, 1);
+	double r2 = Rand(0, 1);
+
+	double phi = 2 * M_PI * r1;
+	double sqrt_r2 = sqrt(r2);
+
+	double x = cos(phi) * sqrt_r2;
+	double y = sin(phi) * sqrt_r2;
+	double z = sqrt(1 - r2);
+
+	return Vec3{x, y, z};
 }
 
 double HitSphere(Sphere *sphere, Ray ray)
@@ -168,6 +205,7 @@ Vec3 RayTrace(World *world, Ray ray)
 
 	for (int i = 0; i < max_bounces; i++)
 	{
+		double pdf = 1;
 		HitInfo hit;
 		bool did_hit = NearestHit(world, ray, &hit);
 
@@ -184,9 +222,8 @@ Vec3 RayTrace(World *world, Ray ray)
 		Material mat = world->materials[hit.material_idx];
 
 		Vec3 next_direction;
-		Vec3 albedo;
+		Vec3 attenuation_factor;
 		if (mat.transparent) {
-
 			double ri = front_face ? (1/mat.ior) : mat.ior;
 
 			Vec3 unit_direction = Normalize(ray.direction);
@@ -197,15 +234,15 @@ Vec3 RayTrace(World *world, Ray ray)
 			bool cannot_refract = ri * sin_theta > 1.0;
 
 			if (cannot_refract || Fresnel(cos_theta, ri) > Rand(0, 1)) {
-				albedo = {1, 1, 1};
+				attenuation_factor = {1, 1, 1};
 				next_direction = Reflect(unit_direction, hit.normal);
 			} else {
-				albedo = mat.albedo;
+				attenuation_factor = mat.albedo;
 				next_direction = Refract(unit_direction, hit.normal, ri);
 			}
 
 		} else if (mat.metallic) {
-			albedo = mat.albedo;
+			attenuation_factor = mat.albedo;
 
 			Vec3 reflection = Normalize(Reflect(ray.direction, hit.normal));
 			Vec3 fuzz = RandomUnitVector() * mat.roughness;
@@ -214,22 +251,22 @@ Vec3 RayTrace(World *world, Ray ray)
 
 			// Absorb rays pointing back
 			if (Dot(hit.normal, next_direction) < 0)
-				return color;
+				break;
 
 		} else { // Lambertian
-			albedo = mat.albedo;
+			Vec3 cosine_sample = CosineWeightedSample();
+			pdf = CosineWeightedPDF(cosine_sample);
+			next_direction = TransformHemisphere(cosine_sample, hit.normal);
 
-			next_direction = hit.normal + RandomUnitVector();
+			double cos_theta = Dot(next_direction, hit.normal);
 
-			// Catch the unlucky ones
-			if (NearZero(next_direction))
-				next_direction = hit.normal;
+			attenuation_factor = LambertianBRDF(mat.albedo) * cos_theta / pdf;
 		}
 
 		ray = {hit.hit_point, next_direction};
 
 		color += attenuation * mat.emission;
-		attenuation *= albedo;
+		attenuation *= attenuation_factor;
 	}
 
 	return color;
@@ -308,14 +345,15 @@ int main()
 	world.sun_color = {.5, .5, .5};
 
 	int width = 630, height = 340;
+	int n_samples = 100;
 	double exposure = 1.;
-	// 90 degrees
-	double fov = M_PI/2;
+	double fov = 90;
 	Vec3 camera_position = {-4, 3, 2};
 
+	double fov_radians = fov * M_PI / 180;
 	double aspect_ratio = (double)width/height;
 	double viewport_distance = 1;
-	double viewport_height = 2 * tan(fov/2) * viewport_distance;
+	double viewport_height = 2 * tan(fov_radians/2) * viewport_distance;
 	double viewport_width = viewport_height * aspect_ratio;
 
 	Vec3 looking_at = world.spheres[0].center;
@@ -338,8 +376,6 @@ int main()
 	Vec3 upper_left_pixel = upper_left + (du + dv)/2;
 
 	byte *image_data = (byte *)malloc(sizeof(u8) * width * height * 3);
-
-	int n_samples = 100;
 
 	double percent_row = 100 / (double)height;
 

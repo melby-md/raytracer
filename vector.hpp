@@ -119,10 +119,4 @@ static inline Vec3 Refract(Vec3 v, Vec3 n, double eta)
 		return eta * v - (eta * Dot(n, v) + sqrt(k)) * n;
 }
 
-bool NearZero(Vec3 v)
-{
-	double s = 1e-8;
-	return (fabs(v.x) < s) && (fabs(v.y) < s) && (fabs(v.z) < s);
-}
-
 #endif
