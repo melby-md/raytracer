@@ -123,19 +123,18 @@ Vec3 CosineWeightedSample()
 double HitSphere(Sphere *sphere, Ray ray)
 {
 	Vec3 oc = sphere->center - ray.origin;
-	double a = Dot(ray.direction, ray.direction);
 	double h = Dot(ray.direction, oc);
 	double c = Dot(oc, oc) - sphere->radius*sphere->radius;
-	double delta = h*h - a*c;
+	double delta = h*h - c;
 
 	if (delta < .001)
 		return -1;
 
 	double sqd = sqrt(delta);
-	double distance = (h - sqd)/a;
+	double distance = h - sqd;
 
 	if (distance < .001) {
-		distance = (h + sqd)/a;
+		distance = h + sqd;
 		if (distance < .001)
 			return -1;
 	}
@@ -223,19 +222,17 @@ Vec3 RayTrace(World *world, Ray ray)
 		if (mat.transparent) {
 			double ri = front_face ? (1/mat.ior) : mat.ior;
 
-			Vec3 unit_direction = Normalize(ray.direction);
-
-			double cos_theta = Min(Dot(-unit_direction, hit.normal), 1);
+			double cos_theta = Min(Dot(-ray.direction, hit.normal), 1);
 			double sin_theta = sqrt(1 - cos_theta*cos_theta);
 
 			bool cannot_refract = ri * sin_theta > 1.0;
 
 			if (cannot_refract || Fresnel(cos_theta, ri) > Rand(0, 1)) {
 				attenuation_factor = {1, 1, 1};
-				next_direction = Reflect(unit_direction, hit.normal);
+				next_direction = Reflect(ray.direction, hit.normal);
 			} else {
 				attenuation_factor = mat.albedo;
-				next_direction = Refract(unit_direction, hit.normal, ri);
+				next_direction = Refract(ray.direction, hit.normal, ri);
 			}
 
 		} else if (mat.metallic) {
@@ -244,7 +241,7 @@ Vec3 RayTrace(World *world, Ray ray)
 			Vec3 reflection = Normalize(Reflect(ray.direction, hit.normal));
 			Vec3 fuzz = RandomUnitVector() * mat.roughness;
 
-			next_direction = reflection + fuzz;
+			next_direction = Normalize(reflection + fuzz);
 
 			// Absorb rays pointing back
 			if (Dot(hit.normal, next_direction) < 0)
@@ -388,7 +385,7 @@ int main()
 				double random_v = Rand(-.5, .5);
 
 				Vec3 pixel_center = upper_left_pixel + du * (u + random_u) + dv * (v + random_v);
-				Vec3 ray_direction = pixel_center - camera_position;
+				Vec3 ray_direction = Normalize(pixel_center - camera_position);
 				Ray ray = {camera_position, ray_direction};
 
 				color += RayTrace(&world, ray);
