@@ -66,8 +66,15 @@ double LinearToGamma(double color, double exposure)
 
 double Rand(double min, double max)
 {
-    double f = (double)rand() / RAND_MAX;
-    return min + f * (max - min);
+	// Xorshift32
+	static u32 state = 69420;
+
+	state ^= state << 13;
+	state ^= state >> 17;
+	state ^= state << 5;
+
+	double f = (double)state / UINT32_MAX;
+	return min + f * (max - min);
 }
 
 Vec3 RandomUnitVector()
