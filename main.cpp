@@ -11,10 +11,11 @@ constexpr double INF = std::numeric_limits<double>::infinity();
 struct Material {
 	Vec3 albedo;
 	Vec3 emission;
+
 	double roughness;
 	double ior;
+	double metallic;
 
-	bool metallic;
 	bool transparent;
 };
 
@@ -77,32 +78,61 @@ double Rand(double min, double max)
 	return min + f * (max - min);
 }
 
-Vec3 RandomUnitVector()
-{
-	for (;;) {
-		Vec3 p = {Rand(-1, 1), Rand(-1, 1), Rand(-1, 1)};
-		double lensq = Length2(p);
-		if (1e-160 < lensq && lensq <= 1)
-			return p / sqrt(lensq);
-	}
-}
-
 double Fresnel(double cosine, double refraction_index)
 {
-	// Use Schlick's approximation for reflectance.
-	auto r0 = (1 - refraction_index) / (1 + refraction_index);
+	double r0 = (1 - refraction_index) / (1 + refraction_index);
 	r0 = r0*r0;
 	return r0 + (1-r0)*pow((1 - cosine), 5);
 }
 
-Vec3 LambertianBRDF(Vec3 albedo)
+Vec3 Fresnel(double cosine, Vec3 f0)
 {
-	return albedo / M_PI;
+	return f0 + (Vec3{1, 1, 1} - f0) * pow(1 - cosine, 5);
 }
 
-double CosineWeightedPDF(Vec3 v)
+/*
+ * https://jcgt.org/published/0003/02/03/
+ * https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
+ */
+Vec3 BRDF(Vec3 v, Vec3 n, Vec3 l, Material mat)
 {
-	return v.z / M_PI;
+	Vec3 h = Normalize(v + l);
+
+	double alpha = mat.roughness * mat.roughness;
+	double alpha2 = alpha * alpha;
+
+	// GGX normal distribution function
+	double n_dot_h = fabs(Dot(n, h));
+	double ndf = alpha2 / (M_PI * pow(pow(n_dot_h, 2) * (alpha2 - 1) + 1, 2));
+
+	// Visibility function
+	double n_dot_v = fabs(Dot(n, v));
+	double n_dot_l = fabs(Dot(n, l));
+
+	double vis_v = 1 / (n_dot_v + sqrt(alpha2 + (1.0 - alpha2) * pow(n_dot_v, 2)));
+	double vis_l = 1 / (n_dot_l + sqrt(alpha2 + (1.0 - alpha2) * pow(n_dot_l, 2)));
+
+	double vis = vis_v * vis_l;
+
+	// Fresnel term
+	double r0 = pow((1 - mat.ior) / (1 + mat.ior), 2);
+	Vec3 dielectric_fresnel = Vec3{r0, r0, r0};
+
+	Vec3 f0 = Lerp(dielectric_fresnel, mat.albedo, mat.metallic);
+
+	double h_dot_v = fabs(Dot(h, v));
+	Vec3 fresnel = Fresnel(h_dot_v, f0);
+
+	Vec3 diffuse = (Vec3{1, 1, 1} - fresnel) * mat.albedo / M_PI * (1 - mat.metallic);
+
+	Vec3 specular = fresnel * vis * ndf;
+
+	return diffuse + specular;
+}
+
+double CosineWeightedPDF(Vec3 wi)
+{
+	return wi.z / M_PI;
 }
 
 Vec3 CosineWeightedSample()
@@ -118,6 +148,48 @@ Vec3 CosineWeightedSample()
 	double z = sqrt(1 - r2);
 
 	return Vec3{x, y, z};
+}
+
+/*
+ * https://jcgt.org/published/0007/04/01/
+ */
+Vec3 GGXVNDFSample(Vec3 wo, double roughness)
+{
+	double r1 = Rand(0, 1);
+	double r2 = Rand(0, 1);
+
+	double alpha = roughness * roughness;
+
+	Vec3 vh = Normalize(Vec3{alpha * wo.x, alpha * wo.y, wo.z});
+	double lensq = vh.x * vh.x + vh.y * vh.y;
+	Vec3 t1 = lensq > 0 ? Vec3{-vh.y, vh.x, 0} / sqrt(lensq) : Vec3{1, 0, 0};
+	Vec3 t2 = Cross(t1, vh);
+	double r = sqrt(r1);
+	double phi = 2 * M_PI * r2;
+
+	double p1 = r*cos(phi);
+	double p2 = r*sin(phi);
+	double s = .5 * (1 + vh.z);
+	p2 = (1 - s) * sqrt(Max(0.0, 1.0 - p1 * p1)) + s * p2;
+
+	Vec3 n = p1*t1 + p2*t2 + sqrt(Max(0, 1 - p1*p1 - p2*p2))*vh;
+	n = Normalize(Vec3{alpha*n.x, alpha*n.y, Max(0, n.z)});
+
+	return 2 * n * Dot(n, wo) - wo;
+}
+
+double GGXVNDFPDF(Vec3 wo, Vec3 wi, double roughness)
+{
+	double alpha = roughness * roughness;
+	double alpha2 = alpha * alpha;
+
+	Vec3 h = Normalize(wo + wi);
+
+	double d = alpha2 / M_PI / pow((alpha2 - 1.0) * h.z * h.z + 1.0, 2.0);
+
+	double vis_v = 2.0 * fabs(wo.z) / (fabs(wo.z) + sqrt(alpha2 + (1.0 - alpha2) * wo.z * wo.z));
+
+	return d * vis_v / 4.0 / wo.z;
 }
 
 double HitSphere(Sphere *sphere, Ray ray)
@@ -201,7 +273,6 @@ Vec3 RayTrace(World *world, Ray ray)
 
 	for (int i = 0; i < max_bounces; i++)
 	{
-		double pdf = 1;
 		HitInfo hit;
 		bool did_hit = NearestHit(world, ray, &hit);
 
@@ -235,28 +306,39 @@ Vec3 RayTrace(World *world, Ray ray)
 				next_direction = Refract(ray.direction, hit.normal, ri);
 			}
 
-		} else if (mat.metallic) {
-			attenuation_factor = mat.albedo;
-
-			Vec3 reflection = Normalize(Reflect(ray.direction, hit.normal));
-			Vec3 fuzz = RandomUnitVector() * mat.roughness;
-
-			next_direction = Normalize(reflection + fuzz);
-
-			// Absorb rays pointing back
-			if (Dot(hit.normal, next_direction) < 0)
-				break;
-
-		} else { // Lambertian
+		} else {
 			Mat3 global_basis = OrthoNormalBasis(hit.normal);
+			Mat3 local_basis = Transpose(global_basis);
 
+			Vec3 wi;
+			Vec3 wo = local_basis * -ray.direction;
 			Vec3 cosine_sample = CosineWeightedSample();
-			pdf = CosineWeightedPDF(cosine_sample);
-			next_direction = global_basis * cosine_sample;
+			Vec3 vndf_sample = GGXVNDFSample(wo, mat.roughness);
 
-			double cos_theta = Dot(next_direction, hit.normal);
+			double cosine_weight = 1 - mat.metallic;
+			double vndf_weight = 1 - cosine_weight * mat.roughness;
 
-			attenuation_factor = LambertianBRDF(mat.albedo) * cos_theta / pdf;
+			double sum_weights = vndf_weight + cosine_weight;
+
+			vndf_weight /= sum_weights;
+			cosine_weight /= sum_weights;
+
+			if (Rand(0, 1) < cosine_weight) {
+				wi = cosine_sample;
+			} else {
+				wi = vndf_sample;
+			}
+
+			double cosine_pdf = CosineWeightedPDF(wi);
+			double vndf_pdf = GGXVNDFPDF(wo, wi, mat.roughness);
+
+			double cos_theta = fabs(wi.z);
+
+			next_direction = global_basis * wi;
+
+			double pdf = cosine_pdf * cosine_weight + vndf_pdf * vndf_weight;
+
+			attenuation_factor = BRDF(next_direction, hit.normal, -ray.direction, mat) * cos_theta / pdf;
 		}
 
 		ray = {hit.hit_point, next_direction};
@@ -268,7 +350,7 @@ Vec3 RayTrace(World *world, Ray ray)
 	return color;
 }
 
-int AddMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness, double ior, bool metallic, bool transparent)
+int AddMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness, double ior, double metallic, bool transparent)
 {
 	if (world->material_count >= MAX_MATERIALS)
 		Panic("Too much materials");
@@ -285,14 +367,14 @@ int AddMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness, doub
 	return world->material_count++;
 }
 
-int AddLambertianMaterial(World *world, Vec3 albedo, Vec3 emission)
+int AddDielectricMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness)
 {
-	return AddMaterial(world, albedo, emission, 0, 0, false, false);
+	return AddMaterial(world, albedo, emission, roughness, 1.5, 0, false);
 }
 
 int AddMetallicMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness)
 {
-	return AddMaterial(world, albedo, emission, roughness, 0, true, false);
+	return AddMaterial(world, albedo, emission, roughness, 0, 1, false);
 }
 
 int AddTransparentMaterial(World *world, Vec3 albedo, Vec3 emission, double ior)
@@ -328,21 +410,21 @@ int main()
 {
 	World world = {};
 
-	int gray = AddLambertianMaterial(&world, {.7, .7, .7}, {0, 0, 0});
-	int red = AddLambertianMaterial(&world, {.8, 0, 0}, {0, 0, 0});
-	int light = AddLambertianMaterial(&world, {0, 0, 0}, {9, 9, 9});
-	int glass = AddTransparentMaterial(&world, {1, 1, 1}, {0, 0, 0}, 1.5);
+	int gray = AddDielectricMaterial(&world, {.7, .7, .7}, {0, 0, 0}, 1);
+	int red = AddDielectricMaterial(&world, {1, 0, 0}, {0, 0, 0}, .01);
+	int light = AddDielectricMaterial(&world, {0, 0, 0}, {.5, .5, 5}, 1);
+	int mirror = AddMetallicMaterial(&world, {.5, .5, 0}, {0, 0, 0}, .1);
 
-	AddSphere(&world, {0, 0, 1}, 2, glass);
-	AddSphere(&world, {0, 3, -1.5}, .5, red);
-	AddSphere(&world, {-1, -3, 0}, 1, light);
+	AddSphere(&world, {0, 0, 1}, 2, mirror);
+	AddSphere(&world, {0, 3, -1.5}, .5, light);
+	AddSphere(&world, {-1, -3, 0}, 1, red);
 	AddPlane(&world, {0, 0, -1}, 2, gray);
 
-	world.sun_color = {.5, .5, .5};
+	world.sun_color = {.5, .5, .8};
 
 	int width = 630, height = 340;
-	int n_samples = 100;
-	double exposure = 1.;
+	int n_samples = 500;
+	double exposure = 1;
 	double fov = 90;
 	Vec3 camera_position = {-4, 3, 2};
 

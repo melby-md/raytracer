@@ -76,6 +76,11 @@ static inline Vec3 &operator/=(Vec3 &v, double s)
 	return v;
 }
 
+static inline Vec3 Lerp(Vec3 v0, Vec3 v1, double t)
+{
+	return (1 - t) * v0 + t * v1;
+}
+
 static inline double Dot(Vec3 a, Vec3 b)
 {
 	return a.x*b.x + a.y*b.y + a.z*b.z;
@@ -145,6 +150,10 @@ static inline Mat3 Transpose(Mat3 m)
 		{m.i.y, m.j.y, m.k.y},
 		{m.i.z, m.j.z, m.k.z}
 	};
+}
+
+double Heaviside(double x) {
+	return (x > 0) ? 1 : 0;
 }
 
 #endif
