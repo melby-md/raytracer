@@ -4,7 +4,7 @@
 
 #include "bmp.hpp"
 #include "common.hpp"
-#include "vector.hpp"
+#include "mathlib.hpp"
 
 constexpr double INF = std::numeric_limits<double>::infinity();
 
@@ -93,16 +93,6 @@ double Fresnel(double cosine, double refraction_index)
 	auto r0 = (1 - refraction_index) / (1 + refraction_index);
 	r0 = r0*r0;
 	return r0 + (1-r0)*pow((1 - cosine), 5);
-}
-
-Vec3 TransformHemisphere(Vec3 v, Vec3 n)
-{
-	Vec3 z_axis = n;
-	Vec3 a = (fabs(z_axis.x) > .9) ? Vec3 {0, 1, 0} : Vec3{1, 0, 0};
-	Vec3 y_axis = Normalize(Cross(z_axis, a));
-	Vec3 x_axis = Cross(z_axis, y_axis);
-
-	return (v.x * x_axis) + (v.y * y_axis) + (v.z * z_axis);
 }
 
 Vec3 LambertianBRDF(Vec3 albedo)
@@ -261,9 +251,11 @@ Vec3 RayTrace(World *world, Ray ray)
 				break;
 
 		} else { // Lambertian
+			Mat3 global_basis = OrthoNormalBasis(hit.normal);
+
 			Vec3 cosine_sample = CosineWeightedSample();
 			pdf = CosineWeightedPDF(cosine_sample);
-			next_direction = TransformHemisphere(cosine_sample, hit.normal);
+			next_direction = global_basis * cosine_sample;
 
 			double cos_theta = Dot(next_direction, hit.normal);
 

@@ -1,5 +1,5 @@
-#ifndef _VECTOR_HPP
-#define _VECTOR_HPP
+#ifndef _MATHLIB_HPP
+#define _MATHLIB_HPP
 #include <math.h>
 
 struct Vec3 {
@@ -117,6 +117,34 @@ static inline Vec3 Refract(Vec3 v, Vec3 n, double eta)
 		return {};
 	else
 		return eta * v - (eta * Dot(n, v) + sqrt(k)) * n;
+}
+
+// 3x3 column major
+struct Mat3 {
+	Vec3 i, j, k;
+};
+
+static inline Vec3 operator*(Mat3 m, Vec3 v)
+{
+	return v.x * m.i + v.y * m.j + v.z * m.k;
+}
+
+static inline Mat3 OrthoNormalBasis(Vec3 z_axis)
+{
+	Vec3 a = (fabs(z_axis.x) > .9) ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+	Vec3 y_axis = Normalize(Cross(z_axis, a));
+	Vec3 x_axis = Cross(z_axis, y_axis);
+
+	return Mat3{x_axis, y_axis, z_axis};
+}
+
+static inline Mat3 Transpose(Mat3 m)
+{
+	return Mat3{
+		{m.i.x, m.j.x, m.k.x},
+		{m.i.y, m.j.y, m.k.y},
+		{m.i.z, m.j.z, m.k.z}
+	};
 }
 
 #endif

@@ -6,7 +6,7 @@ LDFLAGS = -lm
 
 all: raytracer
 
-raytracer: main.cpp common.hpp vector.hpp bmp.hpp
+raytracer: main.cpp common.hpp mathlib.hpp bmp.hpp
 	$(CXX) -o $@ $< $(FLAGS) $(CFLAGS) $(LDFLAGS)
 
 clean:
