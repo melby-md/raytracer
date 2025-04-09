@@ -152,8 +152,4 @@ static inline Mat3 Transpose(Mat3 m)
 	};
 }
 
-double Heaviside(double x) {
-	return (x > 0) ? 1 : 0;
-}
-
 #endif

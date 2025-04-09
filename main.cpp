@@ -94,7 +94,7 @@ Vec3 Fresnel(double cosine, Vec3 f0)
  * https://jcgt.org/published/0003/02/03/
  * https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
  */
-Vec3 BRDF(Vec3 v, Vec3 n, Vec3 l, Material mat)
+Vec3 BRDF(Vec3 l, Vec3 n, Vec3 v, Material mat)
 {
 	Vec3 h = Normalize(v + l);
 
@@ -109,10 +109,10 @@ Vec3 BRDF(Vec3 v, Vec3 n, Vec3 l, Material mat)
 	double n_dot_v = fabs(Dot(n, v));
 	double n_dot_l = fabs(Dot(n, l));
 
-	double vis_v = 1 / (n_dot_v + sqrt(alpha2 + (1.0 - alpha2) * pow(n_dot_v, 2)));
-	double vis_l = 1 / (n_dot_l + sqrt(alpha2 + (1.0 - alpha2) * pow(n_dot_l, 2)));
+	double vis_v = n_dot_l * sqrt(n_dot_v * n_dot_v * (1 - alpha2) + alpha2);
+	double vis_l = n_dot_v * sqrt(n_dot_l * n_dot_l * (1 - alpha2) + alpha2);
 
-	double vis = vis_v * vis_l;
+	double vis = .5 / (vis_v + vis_l);
 
 	// Fresnel term
 	double r0 = pow((1 - mat.ior) / (1 + mat.ior), 2);
@@ -125,14 +125,14 @@ Vec3 BRDF(Vec3 v, Vec3 n, Vec3 l, Material mat)
 
 	Vec3 diffuse = (Vec3{1, 1, 1} - fresnel) * mat.albedo / M_PI * (1 - mat.metallic);
 
-	Vec3 specular = fresnel * vis * ndf;
+	Vec3 specular = fresnel * (vis * ndf);
 
 	return diffuse + specular;
 }
 
 double CosineWeightedPDF(Vec3 wi)
 {
-	return wi.z / M_PI;
+	return Max(0, wi.z) / M_PI;
 }
 
 Vec3 CosineWeightedSample()
@@ -185,11 +185,11 @@ double GGXVNDFPDF(Vec3 wo, Vec3 wi, double roughness)
 
 	Vec3 h = Normalize(wo + wi);
 
-	double d = alpha2 / M_PI / pow((alpha2 - 1.0) * h.z * h.z + 1.0, 2.0);
+	double ndf = alpha2 / (M_PI * pow(h.z * h.z * (alpha2 - 1) + 1, 2));
 
-	double vis_v = 2.0 * fabs(wo.z) / (fabs(wo.z) + sqrt(alpha2 + (1.0 - alpha2) * wo.z * wo.z));
+	double geometry_v = 2.0 * fabs(wo.z) / (fabs(wo.z) + sqrt(alpha2 + (1.0 - alpha2) * wo.z * wo.z));
 
-	return d * vis_v / 4.0 / wo.z;
+	return ndf * geometry_v / (4 * wo.z);
 }
 
 double HitSphere(Sphere *sphere, Ray ray)
@@ -282,15 +282,17 @@ Vec3 RayTrace(World *world, Ray ray)
 			break;
 		}
 
-		bool front_face = Dot(ray.direction, hit.normal) < 0;
-		if (!front_face)
-			hit.normal = -hit.normal;
-
 		Material mat = world->materials[hit.material_idx];
 
 		Vec3 next_direction;
 		Vec3 attenuation_factor;
 		if (mat.transparent) {
+			bool front_face = Dot(ray.direction, hit.normal) < 0;
+
+			if (!front_face) {
+				hit.normal = -hit.normal;
+			}
+
 			double ri = front_face ? (1/mat.ior) : mat.ior;
 
 			double cos_theta = Min(Dot(-ray.direction, hit.normal), 1);
@@ -332,14 +334,15 @@ Vec3 RayTrace(World *world, Ray ray)
 			double cosine_pdf = CosineWeightedPDF(wi);
 			double vndf_pdf = GGXVNDFPDF(wo, wi, mat.roughness);
 
-			double cos_theta = fabs(wi.z);
-
 			next_direction = global_basis * wi;
+
+			double cos_theta = fabs(Dot(next_direction, hit.normal));
 
 			double pdf = cosine_pdf * cosine_weight + vndf_pdf * vndf_weight;
 
 			attenuation_factor = BRDF(next_direction, hit.normal, -ray.direction, mat) * cos_theta / pdf;
 		}
+
 
 		ray = {hit.hit_point, next_direction};
 
@@ -413,12 +416,12 @@ int main()
 	int gray = AddDielectricMaterial(&world, {.7, .7, .7}, {0, 0, 0}, 1);
 	int red = AddDielectricMaterial(&world, {1, 0, 0}, {0, 0, 0}, .01);
 	int light = AddDielectricMaterial(&world, {0, 0, 0}, {.5, .5, 5}, 1);
-	int mirror = AddMetallicMaterial(&world, {.5, .5, 0}, {0, 0, 0}, .1);
+	int mirror = AddMetallicMaterial(&world, {.8, .8, .8}, {0, 0, 0}, .4);
 
 	AddSphere(&world, {0, 0, 1}, 2, mirror);
 	AddSphere(&world, {0, 3, -1.5}, .5, light);
 	AddSphere(&world, {-1, -3, 0}, 1, red);
-	AddPlane(&world, {0, 0, -1}, 2, gray);
+	AddPlane(&world, {0, 0, 1}, 2, gray);
 
 	world.sun_color = {.5, .5, .8};
 
