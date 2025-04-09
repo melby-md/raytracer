@@ -331,6 +331,10 @@ Vec3 RayTrace(World *world, Ray ray)
 				wi = vndf_sample;
 			}
 
+			if (wi.z <= 0) {
+				break;
+			}
+
 			double cosine_pdf = CosineWeightedPDF(wi);
 			double vndf_pdf = GGXVNDFPDF(wo, wi, mat.roughness);
 
@@ -421,7 +425,7 @@ int main()
 	AddSphere(&world, {0, 0, 1}, 2, mirror);
 	AddSphere(&world, {0, 3, -1.5}, .5, light);
 	AddSphere(&world, {-1, -3, 0}, 1, red);
-	AddPlane(&world, {0, 0, 1}, 2, gray);
+	AddPlane(&world, {0, 0, -1}, 2, gray);
 
 	world.sun_color = {.5, .5, .8};
 
