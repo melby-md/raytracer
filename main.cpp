@@ -65,7 +65,7 @@ double LinearToGamma(double color, double exposure)
 	return pow(mapped, 1. / gamma);
 }
 
-double Rand(double min, double max)
+double Rand()
 {
 	// Xorshift32
 	static u32 state = 69420;
@@ -74,8 +74,7 @@ double Rand(double min, double max)
 	state ^= state >> 17;
 	state ^= state << 5;
 
-	double f = (double)state / UINT32_MAX;
-	return min + f * (max - min);
+	return (double)state / UINT32_MAX;
 }
 
 double Fresnel(double cosine, double refraction_index)
@@ -137,8 +136,8 @@ double CosineWeightedPDF(Vec3 wi)
 
 Vec3 CosineWeightedSample()
 {
-	double r1 = Rand(0, 1);
-	double r2 = Rand(0, 1);
+	double r1 = Rand();
+	double r2 = Rand();
 
 	double phi = 2 * M_PI * r1;
 	double sqrt_r2 = sqrt(r2);
@@ -155,8 +154,8 @@ Vec3 CosineWeightedSample()
  */
 Vec3 GGXVNDFSample(Vec3 wo, double roughness)
 {
-	double r1 = Rand(0, 1);
-	double r2 = Rand(0, 1);
+	double r1 = Rand();
+	double r2 = Rand();
 
 	double alpha = roughness * roughness;
 
@@ -300,7 +299,7 @@ Vec3 RayTrace(World *world, Ray ray)
 
 			bool cannot_refract = ri * sin_theta > 1.0;
 
-			if (cannot_refract || Fresnel(cos_theta, ri) > Rand(0, 1)) {
+			if (cannot_refract || Fresnel(cos_theta, ri) > Rand()) {
 				attenuation_factor = {1, 1, 1};
 				next_direction = Reflect(ray.direction, hit.normal);
 			} else {
@@ -325,7 +324,7 @@ Vec3 RayTrace(World *world, Ray ray)
 			vndf_weight /= sum_weights;
 			cosine_weight /= sum_weights;
 
-			if (Rand(0, 1) < cosine_weight) {
+			if (Rand() < cosine_weight) {
 				wi = cosine_sample;
 			} else {
 				wi = vndf_sample;
@@ -458,8 +457,6 @@ int main()
 	Vec3 du = viewport_u / width;
 	Vec3 dv = viewport_v / height;
 
-	Vec3 upper_left_pixel = upper_left + (du + dv)/2;
-
 	byte *image_data = (byte *)malloc(sizeof(u8) * width * height * 3);
 
 	double percent_row = 100 / (double)height;
@@ -470,10 +467,10 @@ int main()
 		for (int u = 0; u < width; u++) {
 			Vec3 color = {};
 			for (int i = 0; i < n_samples; i++) {
-				double random_u = Rand(-.5, .5);
-				double random_v = Rand(-.5, .5);
+				double random_u = Rand();
+				double random_v = Rand();
 
-				Vec3 pixel_center = upper_left_pixel + du * (u + random_u) + dv * (v + random_v);
+				Vec3 pixel_center = upper_left + du * (u + random_u) + dv * (v + random_v);
 				Vec3 ray_direction = Normalize(pixel_center - camera_position);
 				Ray ray = {camera_position, ray_direction};
 
