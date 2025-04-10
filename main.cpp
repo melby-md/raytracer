@@ -93,7 +93,7 @@ Vec3 Fresnel(double cosine, Vec3 f0)
  * https://jcgt.org/published/0003/02/03/
  * https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
  */
-Vec3 BRDF(Vec3 l, Vec3 n, Vec3 v, Material mat)
+Vec3 BRDF(Vec3 l, Vec3 v, Material mat)
 {
 	Vec3 h = Normalize(v + l);
 
@@ -101,12 +101,12 @@ Vec3 BRDF(Vec3 l, Vec3 n, Vec3 v, Material mat)
 	double alpha2 = alpha * alpha;
 
 	// GGX normal distribution function
-	double n_dot_h = fabs(Dot(n, h));
+	double n_dot_h = fabs(h.z);
 	double ndf = alpha2 / (M_PI * pow(pow(n_dot_h, 2) * (alpha2 - 1) + 1, 2));
 
 	// Visibility function
-	double n_dot_v = fabs(Dot(n, v));
-	double n_dot_l = fabs(Dot(n, l));
+	double n_dot_v = fabs(v.z);
+	double n_dot_l = fabs(l.z);
 
 	double vis_v = n_dot_l * sqrt(n_dot_v * n_dot_v * (1 - alpha2) + alpha2);
 	double vis_l = n_dot_v * sqrt(n_dot_l * n_dot_l * (1 - alpha2) + alpha2);
@@ -339,11 +339,11 @@ Vec3 RayTrace(World *world, Ray ray)
 
 			next_direction = global_basis * wi;
 
-			double cos_theta = fabs(Dot(next_direction, hit.normal));
+			double cos_theta = fabs(wi.z);
 
 			double pdf = cosine_pdf * cosine_weight + vndf_pdf * vndf_weight;
 
-			attenuation_factor = BRDF(next_direction, hit.normal, -ray.direction, mat) * cos_theta / pdf;
+			attenuation_factor = BRDF(wi, wo, mat) * cos_theta / pdf;
 		}
 
 
