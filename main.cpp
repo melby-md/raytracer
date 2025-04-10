@@ -163,7 +163,7 @@ Vec3 GGXVNDFSample(Vec3 wo, double roughness)
 	Vec3 vh = Normalize(Vec3{alpha * wo.x, alpha * wo.y, wo.z});
 	double lensq = vh.x * vh.x + vh.y * vh.y;
 	Vec3 t1 = lensq > 0 ? Vec3{-vh.y, vh.x, 0} / sqrt(lensq) : Vec3{1, 0, 0};
-	Vec3 t2 = Cross(t1, vh);
+	Vec3 t2 = Cross(vh, t1);
 	double r = sqrt(r1);
 	double phi = 2 * M_PI * r2;
 
