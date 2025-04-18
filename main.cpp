@@ -3,21 +3,11 @@
 #include <stdlib.h>
 
 #include "bmp.hpp"
+#include "bsdf.hpp"
 #include "common.hpp"
 #include "mathlib.hpp"
 
 constexpr double INF = std::numeric_limits<double>::infinity();
-
-struct Material {
-	Vec3 albedo;
-	Vec3 emission;
-
-	double roughness;
-	double ior;
-	double metallic;
-
-	bool transparent;
-};
 
 struct Sphere {
 	int material_idx;
@@ -58,6 +48,8 @@ struct World {
 	Vec3 sun_color;
 };
 
+u32 rng_state = 69420;
+
 double LinearToGamma(double color, double exposure)
 {
 	double gamma = 2.2;
@@ -65,130 +57,12 @@ double LinearToGamma(double color, double exposure)
 	return pow(mapped, 1. / gamma);
 }
 
-double Rand()
-{
-	// Xorshift32
-	static u32 state = 69420;
-
-	state ^= state << 13;
-	state ^= state >> 17;
-	state ^= state << 5;
-
-	return (double)state / UINT32_MAX;
-}
 
 double Fresnel(double cosine, double refraction_index)
 {
 	double r0 = (1 - refraction_index) / (1 + refraction_index);
 	r0 = r0*r0;
 	return r0 + (1-r0)*pow((1 - cosine), 5);
-}
-
-Vec3 Fresnel(double cosine, Vec3 f0)
-{
-	return f0 + (Vec3{1, 1, 1} - f0) * pow(1 - cosine, 5);
-}
-
-/*
- * https://jcgt.org/published/0003/02/03/
- * https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
- */
-Vec3 BRDF(Vec3 l, Vec3 v, Material mat)
-{
-	Vec3 h = Normalize(v + l);
-
-	double alpha = mat.roughness * mat.roughness;
-	double alpha2 = alpha * alpha;
-
-	// GGX normal distribution function
-	double n_dot_h = fabs(h.z);
-	double ndf = alpha2 / (M_PI * pow(pow(n_dot_h, 2) * (alpha2 - 1) + 1, 2));
-
-	// Visibility function
-	double n_dot_v = fabs(v.z);
-	double n_dot_l = fabs(l.z);
-
-	double vis_v = n_dot_l * sqrt(n_dot_v * n_dot_v * (1 - alpha2) + alpha2);
-	double vis_l = n_dot_v * sqrt(n_dot_l * n_dot_l * (1 - alpha2) + alpha2);
-
-	double vis = .5 / (vis_v + vis_l);
-
-	// Fresnel term
-	double r0 = pow((1 - mat.ior) / (1 + mat.ior), 2);
-	Vec3 dielectric_fresnel = Vec3{r0, r0, r0};
-
-	Vec3 f0 = Lerp(dielectric_fresnel, mat.albedo, mat.metallic);
-
-	double h_dot_v = fabs(Dot(h, v));
-	Vec3 fresnel = Fresnel(h_dot_v, f0);
-
-	Vec3 diffuse = (Vec3{1, 1, 1} - fresnel) * mat.albedo / M_PI * (1 - mat.metallic);
-
-	Vec3 specular = fresnel * (vis * ndf);
-
-	return diffuse + specular;
-}
-
-double CosineWeightedPDF(Vec3 wi)
-{
-	return Max(0, wi.z) / M_PI;
-}
-
-Vec3 CosineWeightedSample()
-{
-	double r1 = Rand();
-	double r2 = Rand();
-
-	double phi = 2 * M_PI * r1;
-	double sqrt_r2 = sqrt(r2);
-
-	double x = cos(phi) * sqrt_r2;
-	double y = sin(phi) * sqrt_r2;
-	double z = sqrt(1 - r2);
-
-	return Vec3{x, y, z};
-}
-
-/*
- * https://jcgt.org/published/0007/04/01/
- */
-Vec3 GGXVNDFSample(Vec3 wo, double roughness)
-{
-	double r1 = Rand();
-	double r2 = Rand();
-
-	double alpha = roughness * roughness;
-
-	Vec3 vh = Normalize(Vec3{alpha * wo.x, alpha * wo.y, wo.z});
-	double lensq = vh.x * vh.x + vh.y * vh.y;
-	Vec3 t1 = lensq > 0 ? Vec3{-vh.y, vh.x, 0} / sqrt(lensq) : Vec3{1, 0, 0};
-	Vec3 t2 = Cross(vh, t1);
-	double r = sqrt(r1);
-	double phi = 2 * M_PI * r2;
-
-	double p1 = r*cos(phi);
-	double p2 = r*sin(phi);
-	double s = .5 * (1 + vh.z);
-	p2 = (1 - s) * sqrt(Max(0.0, 1.0 - p1 * p1)) + s * p2;
-
-	Vec3 n = p1*t1 + p2*t2 + sqrt(Max(0, 1 - p1*p1 - p2*p2))*vh;
-	n = Normalize(Vec3{alpha*n.x, alpha*n.y, Max(0, n.z)});
-
-	return 2 * n * Dot(n, wo) - wo;
-}
-
-double GGXVNDFPDF(Vec3 wo, Vec3 wi, double roughness)
-{
-	double alpha = roughness * roughness;
-	double alpha2 = alpha * alpha;
-
-	Vec3 h = Normalize(wo + wi);
-
-	double ndf = alpha2 / (M_PI * pow(h.z * h.z * (alpha2 - 1) + 1, 2));
-
-	double geometry_v = 2.0 * fabs(wo.z) / (fabs(wo.z) + sqrt(alpha2 + (1.0 - alpha2) * wo.z * wo.z));
-
-	return ndf * geometry_v / (4 * wo.z);
 }
 
 double HitSphere(Sphere *sphere, Ray ray)
@@ -268,7 +142,7 @@ Vec3 RayTrace(World *world, Ray ray)
 {
 	int max_bounces = 10;
 
-	Vec3 color = {}, attenuation = {1, 1, 1};
+	Vec3 color = {}, throughput = {1, 1, 1};
 
 	for (int i = 0; i < max_bounces; i++)
 	{
@@ -277,80 +151,23 @@ Vec3 RayTrace(World *world, Ray ray)
 
 		// hit the sky
 		if (!did_hit) {
-			color += attenuation * world->sun_color;
+			color += throughput * world->sun_color;
 			break;
 		}
 
 		Material mat = world->materials[hit.material_idx];
+		color += throughput * mat.emission;
 
-		Vec3 next_direction;
-		Vec3 attenuation_factor;
-		if (mat.transparent) {
-			bool front_face = Dot(ray.direction, hit.normal) < 0;
+		Mat3 global_basis = OrthoNormalBasis(hit.normal);
+		Mat3 local_basis = Transpose(global_basis);
 
-			if (!front_face) {
-				hit.normal = -hit.normal;
-			}
+		Vec3 v = local_basis * -ray.direction;
+		Sample sample = SampleBSDF(v, mat);
 
-			double ri = front_face ? (1/mat.ior) : mat.ior;
+		throughput *= sample.bsdf * fabs(sample.l.z) / sample.pdf;
 
-			double cos_theta = Min(Dot(-ray.direction, hit.normal), 1);
-			double sin_theta = sqrt(1 - cos_theta*cos_theta);
-
-			bool cannot_refract = ri * sin_theta > 1.0;
-
-			if (cannot_refract || Fresnel(cos_theta, ri) > Rand()) {
-				attenuation_factor = {1, 1, 1};
-				next_direction = Reflect(ray.direction, hit.normal);
-			} else {
-				attenuation_factor = mat.albedo;
-				next_direction = Refract(ray.direction, hit.normal, ri);
-			}
-
-		} else {
-			Mat3 global_basis = OrthoNormalBasis(hit.normal);
-			Mat3 local_basis = Transpose(global_basis);
-
-			Vec3 wi;
-			Vec3 wo = local_basis * -ray.direction;
-			Vec3 cosine_sample = CosineWeightedSample();
-			Vec3 vndf_sample = GGXVNDFSample(wo, mat.roughness);
-
-			double cosine_weight = 1 - mat.metallic;
-			double vndf_weight = 1 - cosine_weight * mat.roughness;
-
-			double sum_weights = vndf_weight + cosine_weight;
-
-			vndf_weight /= sum_weights;
-			cosine_weight /= sum_weights;
-
-			if (Rand() < cosine_weight) {
-				wi = cosine_sample;
-			} else {
-				wi = vndf_sample;
-			}
-
-			if (wi.z <= 0) {
-				break;
-			}
-
-			double cosine_pdf = CosineWeightedPDF(wi);
-			double vndf_pdf = GGXVNDFPDF(wo, wi, mat.roughness);
-
-			next_direction = global_basis * wi;
-
-			double cos_theta = fabs(wi.z);
-
-			double pdf = cosine_pdf * cosine_weight + vndf_pdf * vndf_weight;
-
-			attenuation_factor = BRDF(wi, wo, mat) * cos_theta / pdf;
-		}
-
-
-		ray = {hit.hit_point, next_direction};
-
-		color += attenuation * mat.emission;
-		attenuation *= attenuation_factor;
+		ray.origin = hit.hit_point;
+		ray.direction = global_basis * sample.l;
 	}
 
 	return color;
