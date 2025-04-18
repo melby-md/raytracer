@@ -2,6 +2,10 @@
 #define _MATHLIB_HPP
 #include <math.h>
 
+struct Vec2 {
+	double x, y;
+};
+
 struct Vec3 {
 	double x, y, z;
 };

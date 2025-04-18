@@ -50,6 +50,16 @@ struct World {
 
 u32 rng_state = 69420;
 
+Vec2 RandomDisk() {
+	double theta = 2.0 * M_PI * Rand();
+	double r = sqrt(Rand());
+
+	double x = r * cos(theta);
+	double y = r * sin(theta);
+
+	return Vec2{x, y};
+}
+
 double LinearToGamma(double color, double exposure)
 {
 	double gamma = 2.2;
@@ -250,29 +260,35 @@ int main()
 	double exposure = 1;
 	double fov = 90;
 	Vec3 camera_position = {-4, 3, 2};
+	Vec3 looking_at = world.spheres[0].center;
+	Vec3 vup = {0, 0, 1};
+	double defocus_angle = 2;
+	double focus_dist = Length(looking_at - camera_position);
 
 	double fov_radians = fov * M_PI / 180;
 	double aspect_ratio = (double)width/height;
-	double viewport_distance = 1;
-	double viewport_height = 2 * tan(fov_radians/2) * viewport_distance;
+	double viewport_height = 2 * tan(fov_radians/2) * focus_dist;
 	double viewport_width = viewport_height * aspect_ratio;
 
-	Vec3 looking_at = world.spheres[0].center;
-
 	Vec3 forward = Normalize(looking_at - camera_position);
-	Vec3 right = Normalize(Cross(forward, {0, 0, 1}));
-	Vec3 down = Normalize(Cross(forward, right));
+	Vec3 right = Normalize(Cross(forward, vup));
+	Vec3 up = Cross(right, forward);
 
 	Vec3 viewport_u = right * viewport_width;
-	Vec3 viewport_v = down * viewport_height;
+	Vec3 viewport_v = -up * viewport_height;
 
 	Vec3 upper_left = camera_position +
-		forward * viewport_distance
+		forward * focus_dist
 		- viewport_u/2
 		- viewport_v/2;
 
 	Vec3 du = viewport_u / width;
 	Vec3 dv = viewport_v / height;
+
+	double defocus_angle_radians = defocus_angle * M_PI / 180;
+	double defocus_radius = focus_dist * tan(defocus_angle_radians / 2);
+	Vec3 defocus_disk_u = right * defocus_radius;
+	Vec3 defocus_disk_v = up * defocus_radius;
 
 	byte *image_data = (byte *)malloc(sizeof(u8) * width * height * 3);
 
@@ -286,10 +302,14 @@ int main()
 			for (int i = 0; i < n_samples; i++) {
 				double random_u = Rand();
 				double random_v = Rand();
+				
+				Vec2 rand_disk = RandomDisk();
+				Vec3 rand_defocus = camera_position + (rand_disk.x * defocus_disk_u) + (rand_disk.y * defocus_disk_v);
 
+				Vec3 ray_origin = (defocus_angle <= 0) ? camera_position : rand_defocus;
 				Vec3 pixel_center = upper_left + du * (u + random_u) + dv * (v + random_v);
-				Vec3 ray_direction = Normalize(pixel_center - camera_position);
-				Ray ray = {camera_position, ray_direction};
+				Vec3 ray_direction = Normalize(pixel_center - ray_origin);
+				Ray ray = {ray_origin, ray_direction};
 
 				color += RayTrace(&world, ray);
 			}
