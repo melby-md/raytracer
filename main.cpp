@@ -170,6 +170,15 @@ Vec3 RayTrace(World *world, Ray ray)
 
 		throughput *= sample.bsdf * fabs(sample.l.z) / sample.pdf;
 
+		double roulette_prob = Max(throughput.x, Max(throughput.y, throughput.z));
+
+		if (i > 3) {
+			if (Rand() > roulette_prob)
+				break;
+
+			throughput /= roulette_prob;
+		}
+
 		ray.origin = hit.hit_point;
 		ray.direction = global_basis * sample.l;
 	}
@@ -250,7 +259,7 @@ int main()
 	world.sun_color = Vec3{.5, .5, .8};
 
 	int width = 630, height = 340;
-	int n_samples = 500;
+	int n_samples = 200;
 	double exposure = 1;
 	double fov = 90;
 	Vec3 camera_position = {-4, 3, 2};
