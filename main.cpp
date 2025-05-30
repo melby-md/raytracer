@@ -60,19 +60,12 @@ Vec2 RandomDisk() {
 	return Vec2{x, y};
 }
 
-double LinearToGamma(double color, double exposure)
+Vec3 LinearToGamma(Vec3 color, double exposure)
 {
-	double gamma = 2.2;
-	double mapped = 1. - exp(-color * exposure);
-	return pow(mapped, 1. / gamma);
-}
+	Vec3 mapped = 1. - Exp((-color) * exposure);
 
-
-double Fresnel(double cosine, double refraction_index)
-{
-	double r0 = (1 - refraction_index) / (1 + refraction_index);
-	r0 = r0*r0;
-	return r0 + (1-r0)*pow((1 - cosine), 5);
+	double g = 1 / 2.2;
+	return Pow(mapped, Vec3{g, g, g});
 }
 
 double HitSphere(Sphere *sphere, Ray ray)
@@ -152,7 +145,8 @@ Vec3 RayTrace(World *world, Ray ray)
 {
 	int max_bounces = 10;
 
-	Vec3 color = {}, throughput = {1, 1, 1};
+	Vec3 color = {};
+	Vec3 throughput = {1, 1, 1};
 
 	for (int i = 0; i < max_bounces; i++)
 	{
@@ -243,17 +237,17 @@ int main()
 {
 	World world = {};
 
-	int gray = AddDielectricMaterial(&world, {.7, .7, .7}, {0, 0, 0}, 1);
-	int red = AddDielectricMaterial(&world, {1, 0, 0}, {0, 0, 0}, .01);
-	int light = AddDielectricMaterial(&world, {0, 0, 0}, {.5, .5, 5}, 1);
-	int mirror = AddMetallicMaterial(&world, {.8, .8, .8}, {0, 0, 0}, .4);
+	int gray = AddDielectricMaterial(&world, Vec3{.7, .7, .7}, Vec3{0, 0, 0}, 1);
+	int red = AddDielectricMaterial(&world, Vec3{1, 0, 0}, Vec3{0, 0, 0}, .01);
+	int light = AddDielectricMaterial(&world, Vec3{0, 0, 0}, Vec3{.5, .5, 5}, 1);
+	int mirror = AddMetallicMaterial(&world, Vec3{.8, .8, .8}, Vec3{0, 0, 0}, .4);
 
-	AddSphere(&world, {0, 0, 1}, 2, mirror);
-	AddSphere(&world, {0, 3, -1.5}, .5, light);
-	AddSphere(&world, {-1, -3, 0}, 1, red);
-	AddPlane(&world, {0, 0, -1}, 2, gray);
+	AddSphere(&world, Vec3{0, 0, 1}, 2, mirror);
+	AddSphere(&world, Vec3{0, 3, -1.5}, .5, light);
+	AddSphere(&world, Vec3{-1, -3, 0}, 1, red);
+	AddPlane(&world, Vec3{0, 0, -1}, 2, gray);
 
-	world.sun_color = {.5, .5, .8};
+	world.sun_color = Vec3{.5, .5, .8};
 
 	int width = 630, height = 340;
 	int n_samples = 500;
@@ -315,16 +309,13 @@ int main()
 			}
 
 			color /= n_samples;
-
-			double r = LinearToGamma(color.x, exposure);
-			double g = LinearToGamma(color.y, exposure);
-			double b = LinearToGamma(color.z, exposure);
+			Vec3 mapped = LinearToGamma(color, exposure);
 
 			int pixel_pos = (v * width + u) * 3;
 
-			byte ir = (byte)(255 * Clamp(r, 0, 1));
-			byte ig = (byte)(255 * Clamp(g, 0, 1));
-			byte ib = (byte)(255 * Clamp(b, 0, 1));
+			byte ir = (byte)(255 * Clamp(mapped.x, 0, 1));
+			byte ig = (byte)(255 * Clamp(mapped.y, 0, 1));
+			byte ib = (byte)(255 * Clamp(mapped.z, 0, 1));
 
 			image_data[pixel_pos + 2] = ir;
 			image_data[pixel_pos + 1] = ig;

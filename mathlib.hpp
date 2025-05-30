@@ -1,6 +1,7 @@
 #ifndef _MATHLIB_HPP
 #define _MATHLIB_HPP
 #include <math.h>
+// Why must we suffer Bjarne?
 
 struct Vec2 {
 	double x, y;
@@ -12,27 +13,47 @@ struct Vec3 {
 
 static inline Vec3 operator+(Vec3 a, Vec3 b)
 {
-	return {a.x + b.x, a.y + b.y, a.z + b.z};
+	return Vec3{a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
+static inline Vec3 operator+(Vec3 v, double s)
+{
+	return v + Vec3{s, s, s};
+}
+
+static inline Vec3 operator+(double s, Vec3 v)
+{
+	return v + s;
 }
 
 static inline Vec3 operator-(Vec3 a, Vec3 b)
 {
-	return {a.x - b.x, a.y - b.y, a.z - b.z};
+	return Vec3{a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
 static inline Vec3 operator-(Vec3 v)
 {
-	return {-v.x, -v.y, -v.z};
+	return Vec3{-v.x, -v.y, -v.z};
+}
+
+static inline Vec3 operator-(Vec3 v, double s)
+{
+	return v - Vec3{s, s, s};
+}
+
+static inline Vec3 operator-(double s, Vec3 v)
+{
+	return Vec3{s, s, s} - v;
 }
 
 static inline Vec3 operator*(Vec3 a, Vec3 b)
 {
-	return {a.x*b.x, a.y*b.y, a.z*b.z};
+	return Vec3{a.x*b.x, a.y*b.y, a.z*b.z};
 }
 
 static inline Vec3 operator*(Vec3 v, double s)
 {
-	return {v.x*s, v.y*s, v.z*s};
+	return Vec3{v.x*s, v.y*s, v.z*s};
 }
 
 static inline Vec3 operator*(double s, Vec3 v)
@@ -40,9 +61,14 @@ static inline Vec3 operator*(double s, Vec3 v)
 	return v*s;
 }
 
+static inline Vec3 operator/(Vec3 a, Vec3 b)
+{
+	return Vec3{a.x/b.x, a.y/b.y, a.z/b.z};
+}
+
 static inline Vec3 operator/(Vec3 v, double s)
 {
-	return {v.x/s, v.y/s, v.z/s};
+	return Vec3{v.x/s, v.y/s, v.z/s};
 }
 
 static inline Vec3 operator/(double s, Vec3 v)
@@ -56,10 +82,22 @@ static inline Vec3 &operator+=(Vec3 &a, Vec3 b)
 	return a;
 }
 
+static inline Vec3 &operator+=(Vec3 &v, double s)
+{
+	v = v + s;
+	return v;
+}
+
 static inline Vec3 &operator-=(Vec3 &a, Vec3 b)
 {
 	a = a - b;
 	return a;
+}
+
+static inline Vec3 &operator-=(Vec3 &v, double s)
+{
+	v = v - s;
+	return v;
 }
 
 static inline Vec3 &operator*=(Vec3 &v, double s)
@@ -78,6 +116,12 @@ static inline Vec3 &operator/=(Vec3 &v, double s)
 {
 	v = v / s;
 	return v;
+}
+
+static inline Vec3 &operator/=(Vec3 &a, Vec3 b)
+{
+	a = a / b;
+	return a;
 }
 
 static inline Vec3 Lerp(Vec3 v0, Vec3 v1, double t)
@@ -107,25 +151,26 @@ static inline Vec3 Normalize(Vec3 v)
 
 static inline Vec3 Cross(Vec3 a, Vec3 b)
 {
-	return {
+	return Vec3{
 		a.y*b.z - a.z*b.y,
 		a.z*b.x - a.x*b.z,
 		a.x*b.y - a.y*b.x
 	};
 }
 
+static inline Vec3 Pow(Vec3 a, Vec3 b)
+{
+	return Vec3{pow(a.x, b.x), pow(a.y, b.y), pow(a.z, b.z)};
+}
+
+static inline Vec3 Exp(Vec3 v)
+{
+	return Vec3{exp(v.x), exp(v.y), exp(v.z)};
+}
+
 static inline Vec3 Reflect(Vec3 v, Vec3 n)
 {
 	return v - 2 * Dot(v, n) * n;
-}
-
-static inline Vec3 Refract(Vec3 v, Vec3 n, double eta)
-{
-	double k = 1 - eta * eta * (1 - Dot(n, v) * Dot(n, v));
-	if (k < 0)
-		return {};
-	else
-		return eta * v - (eta * Dot(n, v) + sqrt(k)) * n;
 }
 
 // 3x3 column major
