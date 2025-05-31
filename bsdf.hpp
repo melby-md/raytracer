@@ -21,10 +21,10 @@ struct Sample {
 	Vec3 l;
 };
 
-Vec3 CosineWeightedSample()
+Vec3 CosineWeightedSample(u32 *rng_state)
 {
-	double r1 = Rand();
-	double r2 = Rand();
+	double r1 = Rand(rng_state);
+	double r2 = Rand(rng_state);
 
 	double phi = 2 * M_PI * r1;
 	double sqrt_r2 = sqrt(r2);
@@ -44,10 +44,10 @@ double CosineWeightedPDF(Vec3 l)
 /*
  * https://jcgt.org/published/0007/04/01/
  */
-Vec3 GGXVNDFSample(Vec3 v, double roughness)
+Vec3 GGXVNDFSample(Vec3 v, double roughness, u32 *rng_state)
 {
-	double r1 = Rand();
-	double r2 = Rand();
+	double r1 = Rand(rng_state);
+	double r2 = Rand(rng_state);
 
 	double alpha = roughness * roughness;
 
@@ -128,7 +128,7 @@ Vec3 BSDF(Vec3 v, Vec3 l, Material mat)
 	return diffuse + specular;
 }
 
-Sample SampleBSDF(Vec3 v, Material mat)
+Sample SampleBSDF(Vec3 v, Material mat, u32 *rng_state)
 {
 	double cosine_weight = 1 - mat.metallic;
 	double vndf_weight = 1 - cosine_weight * mat.roughness;
@@ -139,10 +139,10 @@ Sample SampleBSDF(Vec3 v, Material mat)
 	cosine_weight /= sum_weights;
 
 	Vec3 l;
-	if (Rand() < cosine_weight) {
-		l = CosineWeightedSample();
+	if (Rand(rng_state) < cosine_weight) {
+		l = CosineWeightedSample(rng_state);
 	} else {
-		l = GGXVNDFSample(v, mat.roughness);
+		l = GGXVNDFSample(v, mat.roughness, rng_state);
 	}
 
 	double cosine_pdf = CosineWeightedPDF(l);

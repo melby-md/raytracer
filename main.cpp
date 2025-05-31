@@ -48,11 +48,9 @@ struct World {
 	Vec3 sun_color;
 };
 
-u32 rng_state = 69420;
-
-Vec2 RandomDisk() {
-	double theta = 2.0 * M_PI * Rand();
-	double r = sqrt(Rand());
+Vec2 RandomDisk(u32 *rng_state) {
+	double theta = 2.0 * M_PI * Rand(rng_state);
+	double r = sqrt(Rand(rng_state));
 
 	double x = r * cos(theta);
 	double y = r * sin(theta);
@@ -141,7 +139,7 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 	return hit;
 }
 
-Vec3 RayTrace(World *world, Ray ray)
+Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 {
 	int max_bounces = 10;
 
@@ -166,14 +164,14 @@ Vec3 RayTrace(World *world, Ray ray)
 		Mat3 local_basis = Transpose(global_basis);
 
 		Vec3 v = local_basis * -ray.direction;
-		Sample sample = SampleBSDF(v, mat);
+		Sample sample = SampleBSDF(v, mat, rng_state);
 
 		throughput *= sample.bsdf * fabs(sample.l.z) / sample.pdf;
 
 		double roulette_prob = Max(throughput.x, Max(throughput.y, throughput.z));
 
 		if (i > 3) {
-			if (Rand() > roulette_prob)
+			if (Rand(rng_state) > roulette_prob)
 				break;
 
 			throughput /= roulette_prob;
@@ -265,7 +263,7 @@ int main()
 	Vec3 camera_position = {-4, 3, 2};
 	Vec3 looking_at = world.spheres[0].center;
 	Vec3 vup = {0, 0, 1};
-	double defocus_angle = 2;
+	double defocus_angle = -2;
 	double focus_dist = Length(looking_at - camera_position);
 
 	double fov_radians = fov * M_PI / 180;
@@ -295,6 +293,7 @@ int main()
 
 	byte *image_data = (byte *)malloc(sizeof(u8) * width * height * 3);
 
+	u32 rng_state = 69420;
 	double percent_row = 100 / (double)height;
 
 	for (int v = 0; v < height; v++) {
@@ -303,10 +302,10 @@ int main()
 		for (int u = 0; u < width; u++) {
 			Vec3 color = {};
 			for (int i = 0; i < n_samples; i++) {
-				double random_u = Rand();
-				double random_v = Rand();
+				double random_u = Rand(&rng_state);
+				double random_v = Rand(&rng_state);
 				
-				Vec2 rand_disk = RandomDisk();
+				Vec2 rand_disk = RandomDisk(&rng_state);
 				Vec3 rand_defocus = camera_position + (rand_disk.x * defocus_disk_u) + (rand_disk.y * defocus_disk_v);
 
 				Vec3 ray_origin = (defocus_angle <= 0) ? camera_position : rand_defocus;
@@ -314,7 +313,7 @@ int main()
 				Vec3 ray_direction = Normalize(pixel_center - ray_origin);
 				Ray ray = {ray_origin, ray_direction};
 
-				color += RayTrace(&world, ray);
+				color += RayTrace(&world, ray, &rng_state);
 			}
 
 			color /= n_samples;

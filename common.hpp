@@ -57,16 +57,16 @@ typedef int8_t    i8;
 
 typedef unsigned char byte;
 
-extern u32 rng_state;
-
-double Rand()
+double Rand(u32 *rng_state)
 {
 	// Xorshift32
-	rng_state ^= rng_state << 13;
-	rng_state ^= rng_state >> 17;
-	rng_state ^= rng_state << 5;
+	u32 x = *rng_state;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	*rng_state = x;
 
-	return (double)rng_state / UINT32_MAX;
+	return (double)x / UINT32_MAX;
 }
 
 #endif
