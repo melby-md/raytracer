@@ -1,5 +1,5 @@
 CXX = c++
-WARNINGS = -pedantic -Wall -Wextra -Wconversion -Wdouble-promotion -Wshadow -Wno-unused-parameter -Wno-unused-function -Wno-sign-conversion -Werror
+WARNINGS = -pedantic -Wall -Wextra -Wconversion -Wdouble-promotion -Wshadow -Wno-unused-parameter -Wno-unused-function -Wno-unused-variable -Wno-sign-conversion -Werror
 FLAGS = -fopenmp -pipe
 OPT = -O3
 CFLAGS = $(OPT) -std=c++11 -g3 -fno-exceptions -fno-rtti $(WARNINGS)

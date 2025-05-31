@@ -23,6 +23,12 @@ struct Plane {
 	double d;
 };
 
+struct Triangle {
+	int material_idx;
+	Vec3 v0, v1, v2;
+	Vec3 n0, n1, n2;
+};
+
 struct HitInfo {
 	Vec3 hit_point;
 	Vec3 normal;
@@ -42,6 +48,9 @@ struct World {
 
 	int plane_count;
 	Plane planes[MAX_OBJECTS];
+
+	int triangle_count;
+	Triangle triangles[MAX_OBJECTS];
 
 	int material_count;
 	Material materials[MAX_MATERIALS];
@@ -65,6 +74,37 @@ Vec3 LinearToGamma(Vec3 color, double exposure)
 
 	double g = 1 / 2.2;
 	return Pow(mapped, Vec3{g, g, g});
+}
+
+double HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, double *_u, double *_v)
+{
+	Vec3 e0 = v0 - v2;
+	Vec3 e1 = v1 - v2;
+	Vec3 pvec = Cross(ray.direction, e1);
+	double det = Dot(e0, pvec);
+
+	if (det > -.0001 && det < .0001)
+		return -1;
+
+	Vec3 tvec = ray.origin - v2;
+	double u = Dot(tvec, pvec) / det;
+	if (u < 0 || u > 1)
+		return -1;
+
+	Vec3 qvec = Cross(tvec, e0);
+	double v = Dot(ray.direction, qvec) / det;
+	if (v < 0 || u + v > 1)
+		return -1;
+
+	double t = Dot(e1, qvec) / det;
+
+	*_u = u;
+	*_v = v;
+
+	if (t > .0001)
+		return t;
+
+	return -1;
 }
 
 double HitSphere(Sphere *sphere, Ray ray)
@@ -106,6 +146,8 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 {
 	bool hit = false;
 	double min_distance = INF;
+	Vec3 normal, hit_point;
+	int material_idx = -1;
 
 	for (int i = 0; i < world->plane_count; i++) {
 		Plane *plane = &world->planes[i];
@@ -113,10 +155,9 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 		double t = HitPlane(plane, ray);
 
 		if (t > 0 && t < min_distance) {
-			info->hit_point = ray.origin + ray.direction * t;
-			info->normal = plane->normal;
-			info->material_idx = plane->material_idx;
-
+			hit_point = ray.origin + ray.direction * t;
+			material_idx = plane->material_idx;
+			normal = plane->normal;
 			min_distance = t;
 			hit = true;
 		}
@@ -128,14 +169,35 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 		double t = HitSphere(sphere, ray);
 
 		if (t > 0 && t < min_distance) {
-			info->hit_point = ray.origin + ray.direction * t;
-			info->normal = (info->hit_point - sphere->center) / sphere->radius;
-			info->material_idx = sphere->material_idx;
+			hit_point = ray.origin + ray.direction * t;
+			normal = (hit_point - sphere->center) / sphere->radius;
+			material_idx = sphere->material_idx;
+			min_distance = t;
+			hit = true;
+		}
+	}
+
+	for (int i = 0; i < world->triangle_count; i++) {
+		Triangle *tri = &world->triangles[i];
+
+		double u, v;
+		double t = HitTriangle(tri->v0, tri->v1, tri->v2, ray, &u, &v);
+
+		if (t > 0 && t < min_distance) {
+			hit_point = ray.origin + ray.direction * t;
+			material_idx = tri->material_idx;
+
+			double w = 1 - u - v;
+			normal = Normalize(tri->n2 * v + tri->n0 * w + tri->n1 * u);
 
 			min_distance = t;
 			hit = true;
 		}
 	}
+
+	info->hit_point = hit_point;
+	info->normal = normal;
+	info->material_idx = material_idx;
 
 	return hit;
 }
@@ -147,8 +209,7 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 	Vec3 color = {};
 	Vec3 throughput = {1, 1, 1};
 
-	for (int i = 0; i < max_bounces; i++)
-	{
+	for (int i = 0; i < max_bounces; i++) {
 		HitInfo hit;
 		bool did_hit = NearestHit(world, ray, &hit);
 
@@ -241,6 +302,22 @@ void AddPlane(World *world, Vec3 normal, double d, int material_idx)
 	};
 }
 
+void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, int material_idx)
+{
+	if (world->triangle_count >= MAX_OBJECTS)
+		Panic("Too much planes");
+
+	Vec3 e0 = v1 - v0;
+	Vec3 e1 = v2 - v0;
+	Vec3 normal = Normalize(Cross(e0, e1));
+
+	world->triangles[world->triangle_count++] = {
+		material_idx,
+		v0, v1, v2,
+		normal, normal, normal
+	};
+}
+
 int main()
 {
 	World world = {};
@@ -249,11 +326,13 @@ int main()
 	int red = AddDielectricMaterial(&world, Vec3{1, 0, 0}, Vec3{0, 0, 0}, .01);
 	int light = AddDielectricMaterial(&world, Vec3{0, 0, 0}, Vec3{.5, .5, 5}, 1);
 	int mirror = AddMetallicMaterial(&world, Vec3{.8, .8, .8}, Vec3{0, 0, 0}, .4);
+	int mirror2 = AddMetallicMaterial(&world, Vec3{.8, .8, .8}, Vec3{0, 0, 0}, .01);
 
 	AddSphere(&world, Vec3{0, 0, 1}, 2, mirror);
 	AddSphere(&world, Vec3{0, 3, -1.5}, .5, light);
 	AddSphere(&world, Vec3{-1, -3, 0}, 1, red);
-	AddPlane(&world, Vec3{0, 0, -1}, 2, gray);
+	AddPlane(&world, Vec3{0, 0, 1}, -2, gray);
+	AddTriangle(&world, {0, 5, -1}, {-5, -5, -1}, {5, -5, -1},  mirror2);
 
 	world.sun_color = Vec3{.5, .5, .8};
 
@@ -296,6 +375,8 @@ int main()
 
 	double percent_row = 100 / (double)height;
 	double percent_done = 0;
+
+	Log("Raytracing... 0%%\r");
 
 	#pragma omp parallel for
 	for (int v = 0; v < height; v++) {
