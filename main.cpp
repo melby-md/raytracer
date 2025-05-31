@@ -168,9 +168,9 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 
 		throughput *= sample.bsdf * fabs(sample.l.z) / sample.pdf;
 
-		double roulette_prob = Max(throughput.x, Max(throughput.y, throughput.z));
-
 		if (i > 3) {
+			double roulette_prob = Max(throughput.x, Max(throughput.y, throughput.z));
+
 			if (Rand(rng_state) > roulette_prob)
 				break;
 
@@ -293,11 +293,12 @@ int main()
 
 	byte *image_data = (byte *)malloc(sizeof(u8) * width * height * 3);
 
-	u32 rng_state = 69420;
 	double percent_row = 100 / (double)height;
+	double percent_done = 0;
 
+	#pragma omp parallel for
 	for (int v = 0; v < height; v++) {
-		Log("Raytracing... %.0f%%\r", percent_row * v);
+		u32 rng_state = 69420 + v;
 
 		for (int u = 0; u < width; u++) {
 			Vec3 color = {};
@@ -329,8 +330,14 @@ int main()
 			image_data[pixel_pos + 1] = ig;
 			image_data[pixel_pos + 0] = ib;
 		}
+
+		#pragma omp critical
+		{
+			percent_done += percent_row;
+			Log("Raytracing... %.0f%%\r", percent_done);
+		}
 	}
-	Log("Raytracing... 100%%\n");
+	putchar('\n');
 
 	WriteBMP("image.bmp", width, height, image_data);
 
