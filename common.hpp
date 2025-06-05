@@ -7,8 +7,7 @@
 
 // macros
 
-#define sizeof(x) ((iz)sizeof(x))
-#define Countof(x) (sizeof(x)/sizeof((x)[0]))
+#define Countof(x) (isize)(sizeof(x)/sizeof((x)[0]))
 
 #define Max(a, b) ((a) > (b) ? (a) : (b))
 #define Min(a, b) ((a) < (b) ? (a) : (b))
@@ -42,8 +41,8 @@
 // types
 
 typedef uintptr_t uptr;
-typedef ptrdiff_t iz;
-typedef size_t    uz;
+typedef ptrdiff_t isize;
+typedef size_t    usize;
 
 typedef uint64_t  u64;
 typedef uint32_t  u32;

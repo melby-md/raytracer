@@ -8,6 +8,9 @@
 #include "common.hpp"
 #include "mathlib.hpp"
 
+#define FAST_OBJ_IMPLEMENTATION
+#include "third-party/fast_obj.h"
+
 constexpr double INF = std::numeric_limits<double>::infinity();
 
 struct Sphere {
@@ -32,6 +35,7 @@ struct Triangle {
 struct HitInfo {
 	Vec3 hit_point;
 	Vec3 normal;
+	Vec3 uvw;
 	int material_idx;
 };
 
@@ -41,6 +45,7 @@ struct Ray {
 
 constexpr int MAX_OBJECTS = 64;
 constexpr int MAX_MATERIALS = 64;
+constexpr int MAX_TRIANGLES = 30000;
 
 struct World {
 	int sphere_count;
@@ -50,7 +55,7 @@ struct World {
 	Plane planes[MAX_OBJECTS];
 
 	int triangle_count;
-	Triangle triangles[MAX_OBJECTS];
+	Triangle triangles[MAX_TRIANGLES];
 
 	int material_count;
 	Material materials[MAX_MATERIALS];
@@ -129,7 +134,7 @@ double HitSphere(Sphere *sphere, Ray ray)
 double HitPlane(Plane *plane, Ray ray)
 {
 	double denominator = Dot(plane->normal, ray.direction);
-	if (fabs(denominator) < .001)
+	if (denominator < .001)
 		return -1;
 
 	double distance = (plane->d - Dot(ray.origin, plane->normal)) / denominator;
@@ -185,7 +190,8 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 			material_idx = tri->material_idx;
 
 			double w = 1 - u - v;
-			normal = Normalize(tri->n2 * v + tri->n0 * w + tri->n1 * u);
+			normal = Normalize(tri->n0 * u + tri->n1 * v + tri->n2 * w);
+			info->uvw = {u, v, w};
 
 			min_distance = t;
 			hit = true;
@@ -216,8 +222,15 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 			break;
 		}
 
+		if (Dot(ray.direction, hit.normal) == 0)
+			break;
+		if (Dot(ray.direction, hit.normal) > 0)
+			hit.normal = -hit.normal;
+
+		//return hit.normal / 2 + .5;
+		//return hit.uvw;
+
 		Material mat = world->materials[hit.material_idx];
-		color += throughput * mat.emission;
 
 		Mat3 global_basis = OrthoNormalBasis(hit.normal);
 		Mat3 local_basis = Transpose(global_basis);
@@ -225,7 +238,11 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 		Vec3 v = local_basis * -ray.direction;
 		Sample sample = SampleBSDF(v, mat, rng_state);
 
-		throughput *= sample.bsdf * fabs(sample.l.z) / sample.pdf;
+		if (sample.l.z <= 0)
+			break;
+
+		color += throughput * mat.emission;
+		throughput *= sample.bsdf * sample.l.z / sample.pdf;
 
 		if (i > 3) {
 			double roulette_prob = Max(throughput.x, Max(throughput.y, throughput.z));
@@ -299,46 +316,84 @@ void AddPlane(World *world, Vec3 normal, double d, int material_idx)
 	};
 }
 
-void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, int material_idx)
+void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, Vec3 n0, Vec3 n1, Vec3 n2, int material_idx)
 {
-	if (world->triangle_count >= MAX_OBJECTS)
-		Panic("Too much planes");
-
-	Vec3 e0 = v1 - v0;
-	Vec3 e1 = v2 - v0;
-	Vec3 normal = Normalize(Cross(e0, e1));
+	if (world->triangle_count >= MAX_TRIANGLES)
+		Panic("Too much triangles");
 
 	world->triangles[world->triangle_count++] = {
 		material_idx,
 		v0, v1, v2,
-		normal, normal, normal
+		n0, n1, n2
 	};
+}
+
+void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, int material_idx)
+{
+	Vec3 e0 = v1 - v0;
+	Vec3 e1 = v2 - v0;
+	Vec3 normal = Normalize(Cross(e0, e1));
+
+	AddTriangle(world, v0, v1, v2, normal, normal, normal, material_idx);
 }
 
 int main()
 {
-	World world = {};
+	static World world = {};
 
-	int gray = AddDielectricMaterial(&world, Vec3{.7, .7, .7}, Vec3{0, 0, 0}, 1);
-	int red = AddDielectricMaterial(&world, Vec3{1, 0, 0}, Vec3{0, 0, 0}, .01);
-	int light = AddDielectricMaterial(&world, Vec3{0, 0, 0}, Vec3{.5, .5, 5}, 1);
-	int mirror = AddMetallicMaterial(&world, Vec3{.8, .8, .8}, Vec3{0, 0, 0}, .4);
-	int mirror2 = AddMetallicMaterial(&world, Vec3{.8, .8, .8}, Vec3{0, 0, 0}, .01);
+	int red = AddDielectricMaterial(&world, Vec3{1, 0, 0}, Vec3{0, 0, 0}, .1);
+	fastObjMesh* mesh = fast_obj_read("test.obj");
 
-	AddSphere(&world, Vec3{0, 0, 1}, 2, mirror);
-	AddSphere(&world, Vec3{0, 3, -1.5}, .5, light);
-	AddSphere(&world, Vec3{-1, -3, 0}, 1, red);
-	AddPlane(&world, Vec3{0, 0, 1}, -2, gray);
-	AddTriangle(&world, {0, 5, -1}, {-5, -5, -1}, {5, -5, -1},  mirror2);
+	for (unsigned i = 0; i < mesh->face_count; i++) {
+		fastObjIndex idx0 = mesh->indices[i*3+0];
+		fastObjIndex idx1 = mesh->indices[i*3+1];
+		fastObjIndex idx2 = mesh->indices[i*3+2];
+
+		Vec3 v0 = Vec3{
+			-mesh->positions[idx0.p*3+2],
+			-mesh->positions[idx0.p*3+0],
+			mesh->positions[idx0.p*3+1]
+		};
+		Vec3 v1 = Vec3{
+			-mesh->positions[idx1.p*3+2],
+			-mesh->positions[idx1.p*3+0],
+			mesh->positions[idx1.p*3+1]
+		};
+		Vec3 v2 = Vec3{
+			-mesh->positions[idx2.p*3+2],
+			-mesh->positions[idx2.p*3+0],
+			mesh->positions[idx2.p*3+1]
+		};
+
+		Vec3 n0 = Normalize({
+			-mesh->normals[idx0.n*3+2],
+			-mesh->normals[idx0.n*3+0],
+			mesh->normals[idx0.n*3+1],
+		});
+		Vec3 n1 = Normalize({
+			-mesh->normals[idx1.n*3+2],
+			-mesh->normals[idx1.n*3+0],
+			mesh->normals[idx1.n*3+1],
+		});
+		Vec3 n2 = Normalize({
+			-mesh->normals[idx2.n*3+2],
+			-mesh->normals[idx2.n*3+0],
+			mesh->normals[idx2.n*3+1],
+		});
+
+		AddTriangle(&world, v0, v1, v2, n0, n1, n2, red);
+	}
+
+	fast_obj_destroy(mesh);
 
 	world.sun_color = Vec3{.5, .5, .8};
 
 	int width = 630, height = 340;
-	int n_samples = 200;
+	int n_samples = 20;
 	double exposure = 1;
 	double fov = 90;
-	Vec3 camera_position = {-4, 3, 2};
-	Vec3 looking_at = world.spheres[0].center;
+	Vec3 camera_position = {-4, 0, 3};
+	Vec3 looking_at = {};
 	Vec3 vup = {0, 0, 1};
 	double defocus_angle = -2;
 	double focus_dist = Length(looking_at - camera_position);
@@ -373,7 +428,7 @@ int main()
 	double percent_row = 100 / (double)height;
 	double percent_done = 0;
 
-	Log("Raytracing... 0%%\r");
+	Log("Raytracing... 0");
 
 	#pragma omp parallel for
 	for (int v = 0; v < height; v++) {
@@ -413,7 +468,7 @@ int main()
 		#pragma omp critical
 		{
 			percent_done += percent_row;
-			Log("Raytracing... %.0f%%\r", percent_done);
+			Log("\rRaytracing... %.0f%%", percent_done);
 		}
 	}
 	putchar('\n');
