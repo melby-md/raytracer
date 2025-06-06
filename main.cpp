@@ -35,7 +35,6 @@ struct Triangle {
 struct HitInfo {
 	Vec3 hit_point;
 	Vec3 normal;
-	Vec3 uvw;
 	int material_idx;
 };
 
@@ -88,7 +87,7 @@ double HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, double *_u, double *_v)
 	Vec3 pvec = Cross(ray.direction, e1);
 	double det = Dot(e0, pvec);
 
-	if (det < .001)
+	if (fabs(det) < .001)
 		return -1;
 
 	Vec3 tvec = ray.origin - v2;
@@ -102,6 +101,9 @@ double HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, double *_u, double *_v)
 		return -1;
 
 	double t = Dot(e1, qvec) / det;
+
+	if (t < .001)
+		return -1;
 
 	*_u = u;
 	*_v = v;
@@ -191,7 +193,6 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 
 			double w = 1 - u - v;
 			normal = Normalize(tri->n0 * u + tri->n1 * v + tri->n2 * w);
-			info->uvw = {u, v, w};
 
 			min_distance = t;
 			hit = true;
@@ -222,13 +223,10 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 			break;
 		}
 
-		if (Dot(ray.direction, hit.normal) == 0)
-			break;
+		//return hit.normal * .5 + .5;
+
 		if (Dot(ray.direction, hit.normal) > 0)
 			hit.normal = -hit.normal;
-
-		//return hit.normal / 2 + .5;
-		//return hit.uvw;
 
 		Material mat = world->materials[hit.material_idx];
 
@@ -341,7 +339,7 @@ int main()
 {
 	static World world = {};
 
-	int red = AddDielectricMaterial(&world, Vec3{1, 0, 0}, Vec3{0, 0, 0}, .1);
+	int red = AddDielectricMaterial(&world, Vec3{1, 0, 0}, Vec3{0, 0, 0}, .95);
 	fastObjMesh* mesh = fast_obj_read("test.obj");
 
 	for (unsigned i = 0; i < mesh->face_count; i++) {
