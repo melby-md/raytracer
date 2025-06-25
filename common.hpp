@@ -1,23 +1,13 @@
 // Odds and ends...
-#ifndef _COMMON_HPP
-#define _COMMON_HPP
 #include <stddef.h> // ptrdiff_t
 #include <stdint.h> // *int*_t
 #include <stdio.h>
 
-// macros
-
-#define sizeof(x) ((iz)sizeof(x))
 #define Countof(x) (sizeof(x)/sizeof((x)[0]))
 
-#define Max(a, b) ((a) > (b) ? (a) : (b))
-#define Min(a, b) ((a) < (b) ? (a) : (b))
-
-#define Clamp(x, mn, mx) Min(Max(x, mn), mx)
-
-#define Panic(msg) \
+#define Panic(...) \
 	do { \
-		Error("%s", msg); \
+		Error(__VA_ARGS__); \
 		exit(1); \
 	} while (0)
 
@@ -26,24 +16,24 @@
 
 #define _log(level, ...) fprintf(stderr, level ":" __FILE__ ":" xstr(__LINE__) ": " __VA_ARGS__)
 #define Error(...) _log("ERROR", __VA_ARGS__)
-#define Debug(...) _log("DEBUG", __VA_ARGS__)
+#define Trace(...) _log("TRACE", __VA_ARGS__)
 #define Log(...) fprintf(stderr, __VA_ARGS__)
 
-#if __GNUC__
-#  define Break() __builtin_unreachable()
+#ifdef RELEASE
+#  define Break()
+#elif __GNUC__
+#  define Break() __builtin_trap()
 #elif _MSC_VER
 #  define Break() __debugbreak()
 #else
 #  define Break() (*(volatile int *)0 = 0)
 #endif
 
-#define Assert(c) do if (!(c)) Break(); while(0)
-
-// types
+#define Assert(c) if (!(c)) Break()
 
 typedef uintptr_t uptr;
-typedef ptrdiff_t iz;
-typedef size_t    uz;
+typedef ptrdiff_t isize;
+typedef size_t    usize;
 
 typedef uint64_t  u64;
 typedef uint32_t  u32;
@@ -68,5 +58,3 @@ double Rand(u32 *rng_state)
 
 	return (double)x / UINT32_MAX;
 }
-
-#endif

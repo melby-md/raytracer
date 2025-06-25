@@ -1,8 +1,4 @@
-#ifndef _BMP_HPP
-#define _BMP_HPP
 #include <stdio.h>
-
-#include "common.hpp"
 
 void WriteBMP(const char *file_name, int w, int h, byte *data)
 {
@@ -38,5 +34,3 @@ void WriteBMP(const char *file_name, int w, int h, byte *data)
 
 	fclose(f);
 }
-
-#endif

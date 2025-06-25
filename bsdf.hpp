@@ -1,8 +1,3 @@
-#ifndef _BSDF_HPP
-#define _BSDF_HPP
-#include "common.hpp"
-#include "mathlib.hpp"
-
 struct Material {
 	Vec3 albedo;
 	Vec3 emission;
@@ -61,10 +56,10 @@ Vec3 GGXVNDFSample(Vec3 v, double roughness, u32 *rng_state)
 	double p1 = r*cos(phi);
 	double p2 = r*sin(phi);
 	double s = .5 * (1 + vh.z);
-	p2 = (1 - s) * sqrt(Max(0.0, 1.0 - p1 * p1)) + s * p2;
+	p2 = (1 - s) * sqrt(fmax(0.0, 1.0 - p1 * p1)) + s * p2;
 
-	Vec3 n = p1*t1 + p2*t2 + sqrt(Max(0, 1 - p1*p1 - p2*p2))*vh;
-	n = Normalize(Vec3{alpha*n.x, alpha*n.y, Max(0, n.z)});
+	Vec3 n = p1*t1 + p2*t2 + sqrt(fmax(0, 1 - p1*p1 - p2*p2))*vh;
+	n = Normalize(Vec3{alpha*n.x, alpha*n.y, fmax(0, n.z)});
 
 	return 2 * n * Dot(n, v) - v;
 }
@@ -156,5 +151,3 @@ Sample SampleBSDF(Vec3 v, Material mat, u32 *rng_state)
 		l
 	};
 }
-
-#endif

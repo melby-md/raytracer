@@ -1,14 +1,9 @@
-#define _USE_MATH_DEFINES
-#include <limits>
-#include <math.h>
 #include <stdlib.h>
 
-#include "bmp.hpp"
-#include "bsdf.hpp"
 #include "common.hpp"
 #include "mathlib.hpp"
-
-constexpr double INF = std::numeric_limits<double>::infinity();
+#include "bmp.hpp"
+#include "bsdf.hpp"
 
 struct Sphere {
 	int material_idx;
@@ -231,7 +226,7 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 		throughput *= sample.bsdf * fabs(sample.l.z) / sample.pdf;
 
 		if (i > 3) {
-			double roulette_prob = Max(throughput.x, Max(throughput.y, throughput.z));
+			double roulette_prob = fmax(throughput.x, fmax(throughput.y, throughput.z));
 
 			if (Rand(rng_state) > roulette_prob)
 				break;

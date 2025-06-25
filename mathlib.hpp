@@ -1,7 +1,9 @@
-#ifndef _MATHLIB_HPP
-#define _MATHLIB_HPP
+#include <limits>
+#define _USE_MATH_DEFINES
 #include <math.h>
 // Why must we suffer Bjarne?
+
+constexpr double INF = std::numeric_limits<double>::infinity();
 
 struct Vec2 {
 	double x, y;
@@ -10,6 +12,20 @@ struct Vec2 {
 struct Vec3 {
 	double x, y, z;
 };
+
+static inline double Clamp(double x, double mn, double mx)
+{
+	return fmin(mx, fmax(mn, x));
+}
+
+static inline Vec3 Clamp(Vec3 x, double mn, double mx)
+{
+	return {
+		Clamp(x.x, mn, mx),
+		Clamp(x.y, mn, mx),
+		Clamp(x.z, mn, mx)
+	};
+}
 
 static inline Vec3 operator+(Vec3 a, Vec3 b)
 {
@@ -146,7 +162,9 @@ static inline double Length(Vec3 v)
 
 static inline Vec3 Normalize(Vec3 v)
 {
-	return v / Length(v);
+	double length = Length(v);
+	Assert(length > 0);
+	return v / length;
 }
 
 static inline Vec3 Cross(Vec3 a, Vec3 b)
@@ -200,5 +218,3 @@ static inline Mat3 Transpose(Mat3 m)
 		{m.i.z, m.j.z, m.k.z}
 	};
 }
-
-#endif
