@@ -140,7 +140,7 @@ double HitPlane(Plane *plane, Ray ray)
 bool NearestHit(World *world, Ray ray, HitInfo *info)
 {
 	bool hit = false;
-	double min_distance = INF;
+	double min_distance = HUGE_VAL;
 	Vec3 normal, hit_point;
 	int material_idx = -1;
 
@@ -150,10 +150,10 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 		double t = HitPlane(plane, ray);
 
 		if (t > 0 && t < min_distance) {
+			min_distance = t;
 			hit_point = ray.origin + ray.direction * t;
 			material_idx = plane->material_idx;
 			normal = plane->normal;
-			min_distance = t;
 			hit = true;
 		}
 	}
@@ -208,7 +208,6 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 		HitInfo hit;
 		bool did_hit = NearestHit(world, ray, &hit);
 
-		// hit the sky
 		if (!did_hit) {
 			color += throughput * world->sun_color;
 			break;
@@ -313,30 +312,66 @@ void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, int material_idx)
 	};
 }
 
+void LoadCornellBox(World *world)
+{
+	world->sun_color = {};
+
+	world->sphere_count = 0;
+	world->plane_count = 0;
+	world->triangle_count = 0;
+	world->material_count = 0;
+
+	int khaki = AddMaterial(world, {0.725, 0.71, 0.68}, {0, 0, 0}, 1, 1.5, 0, false);
+	int red = AddMaterial(world, {0.63, 0.065, 0.05}, {0, 0, 0}, 1, 1.5, 0, false);
+	int green = AddMaterial(world, {0.14, 0.45, 0.091}, {0, 0, 0}, 1, 1.5, 0, false);
+	int light = AddMaterial(world, {0, 0, 0}, {17, 12, 4}, 1, 1.5, 0, false);
+
+	AddTriangle(world, {-0.99, -1, 0}, {1.04, 0.99, -0}, {-0.99, 1.01, 0}, khaki);
+	AddTriangle(world, {-0.99, -1, 0}, {1.04, -1, -0}, {1.04, 0.99, -0}, khaki);
+	AddTriangle(world, {1.04, 1.02, 1.99}, {-0.99, -1, 1.99}, {-0.99, 1.02, 1.99}, khaki);
+	AddTriangle(world, {1.04, 1.02, 1.99}, {1.04, -1, 1.99}, {-0.99, -1, 1.99}, khaki);
+	AddTriangle(world, {1.04, 0.99, -0}, {1.04, -1, 1.99}, {1.04, 1.02, 1.99}, khaki);
+	AddTriangle(world, {1.04, 0.99, -0}, {1.04, -1, -0}, {1.04, -1, 1.99}, khaki);
+	AddTriangle(world, {-0.99, -1, 0}, {1.04, -1, 1.99}, {1.04, -1, -0}, green);
+	AddTriangle(world, {-0.99, -1, 0}, {-0.99, -1, 1.99}, {1.04, -1, 1.99}, green);
+	AddTriangle(world, {-0.99, 1.01, 0}, {1.04, 1.02, 1.99}, {-0.99, 1.02, 1.99}, red);
+	AddTriangle(world, {-0.99, 1.01, 0}, {1.04, 0.99, -0}, {1.04, 1.02, 1.99}, red);
+	AddTriangle(world, {-0.75, -0.53, 0.6}, {0, -0.13, 0.6}, {-0.57, 0.05, 0.6}, khaki);
+	AddTriangle(world, {-0.57, 0.05, 0.6}, {-0, -0.13, 0}, {-0.57, 0.05, 0}, khaki);
+	AddTriangle(world, {-0.75, -0.53, 0.6}, {-0.57, 0.05, 0}, {-0.75, -0.53, 0}, khaki);
+	AddTriangle(world, {-0.17, -0.7, 0.6}, {-0.75, -0.53, 0}, {-0.17, -0.7, 0}, khaki);
+	AddTriangle(world, {0, -0.13, 0.6}, {-0.17, -0.7, 0}, {-0, -0.13, 0}, khaki);
+	AddTriangle(world, {-0.75, -0.53, 0.6}, {-0.17, -0.7, 0.6}, {0, -0.13, 0.6}, khaki);
+	AddTriangle(world, {-0.57, 0.05, 0.6}, {0, -0.13, 0.6}, {-0, -0.13, 0}, khaki);
+	AddTriangle(world, {-0.75, -0.53, 0.6}, {-0.57, 0.05, 0.6}, {-0.57, 0.05, 0}, khaki);
+	AddTriangle(world, {-0.17, -0.7, 0.6}, {-0.75, -0.53, 0.6}, {-0.75, -0.53, 0}, khaki);
+	AddTriangle(world, {0, -0.13, 0.6}, {-0.17, -0.7, 0.6}, {-0.17, -0.7, 0}, khaki);
+	AddTriangle(world, {0.09, -0.04, 1.2}, {0.49, 0.71, 1.2}, {-0.09, 0.53, 1.2}, khaki);
+	AddTriangle(world, {-0.09, 0.53, 1.2}, {0.49, 0.71, -0}, {-0.09, 0.53, 0}, khaki);
+	AddTriangle(world, {0.49, 0.71, 1.2}, {0.67, 0.14, -0}, {0.49, 0.71, -0}, khaki);
+	AddTriangle(world, {0.67, 0.14, 1.2}, {0.09, -0.04, -0}, {0.67, 0.14, -0}, khaki);
+	AddTriangle(world, {0.09, -0.04, 1.2}, {-0.09, 0.53, 0}, {0.09, -0.04, -0}, khaki);
+	AddTriangle(world, {0.09, -0.04, 1.2}, {0.67, 0.14, 1.2}, {0.49, 0.71, 1.2}, khaki);
+	AddTriangle(world, {-0.09, 0.53, 1.2}, {0.49, 0.71, 1.2}, {0.49, 0.71, -0}, khaki);
+	AddTriangle(world, {0.49, 0.71, 1.2}, {0.67, 0.14, 1.2}, {0.67, 0.14, -0}, khaki);
+	AddTriangle(world, {0.67, 0.14, 1.2}, {0.09, -0.04, 1.2}, {0.09, -0.04, -0}, khaki);
+	AddTriangle(world, {0.09, -0.04, 1.2}, {-0.09, 0.53, 1.2}, {-0.09, 0.53, 0}, khaki);
+	AddTriangle(world, {0.22, 0.24, 1.98}, {-0.16, -0.23, 1.98}, {-0.16, 0.24, 1.98}, light);
+	AddTriangle(world, {0.22, 0.24, 1.98}, {0.22, -0.23, 1.98}, {-0.16, -0.23, 1.98}, light);
+}
+
 int main()
 {
-	World world = {};
+	static World world;
 
-	int gray = AddDielectricMaterial(&world, Vec3{.7, .7, .7}, Vec3{0, 0, 0}, 1);
-	int red = AddDielectricMaterial(&world, Vec3{1, 0, 0}, Vec3{0, 0, 0}, .01);
-	int light = AddDielectricMaterial(&world, Vec3{0, 0, 0}, Vec3{.5, .5, 5}, 1);
-	int mirror = AddMetallicMaterial(&world, Vec3{.8, .8, .8}, Vec3{0, 0, 0}, .4);
-	int mirror2 = AddMetallicMaterial(&world, Vec3{.8, .8, .8}, Vec3{0, 0, 0}, .01);
+	LoadCornellBox(&world);
 
-	AddSphere(&world, Vec3{0, 0, 1}, 2, mirror);
-	AddSphere(&world, Vec3{0, 3, -1.5}, .5, light);
-	AddSphere(&world, Vec3{-1, -3, 0}, 1, red);
-	AddPlane(&world, Vec3{0, 0, 1}, -2, gray);
-	AddTriangle(&world, {0, 5, -1}, {-5, -5, -1}, {5, -5, -1},  mirror2);
-
-	world.sun_color = Vec3{.5, .5, .8};
-
-	int width = 630, height = 340;
-	int n_samples = 200;
+	int width = 400, height = 400;
+	int n_samples = 10;
 	double exposure = 1;
 	double fov = 90;
-	Vec3 camera_position = {-4, 3, 2};
-	Vec3 looking_at = world.spheres[0].center;
+	Vec3 camera_position = {-1.9, 0, 1};
+	Vec3 looking_at = {0, 0, 1};
 	Vec3 vup = {0, 0, 1};
 	double defocus_angle = -2;
 	double focus_dist = Length(looking_at - camera_position);

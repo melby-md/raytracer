@@ -1,9 +1,6 @@
-#include <limits>
 #define _USE_MATH_DEFINES
 #include <math.h>
 // Why must we suffer Bjarne?
-
-constexpr double INF = std::numeric_limits<double>::infinity();
 
 struct Vec2 {
 	double x, y;
