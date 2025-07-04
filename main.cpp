@@ -9,13 +9,13 @@ struct Sphere {
 	int material_idx;
 
 	Vec3 center;
-	double radius;
+	float radius;
 };
 
 struct Plane {
 	int material_idx;
 	Vec3 normal;
-	double d;
+	float d;
 };
 
 struct Triangle {
@@ -54,84 +54,84 @@ struct World {
 };
 
 Vec2 RandomDisk(u32 *rng_state) {
-	double theta = 2.0 * M_PI * Rand(rng_state);
-	double r = sqrt(Rand(rng_state));
+	float theta = 2.f * PI * Rand(rng_state);
+	float r = sqrtf(Rand(rng_state));
 
-	double x = r * cos(theta);
-	double y = r * sin(theta);
+	float x = r * cosf(theta);
+	float y = r * sinf(theta);
 
 	return Vec2{x, y};
 }
 
-Vec3 LinearToGamma(Vec3 color, double exposure)
+Vec3 LinearToGamma(Vec3 color, float exposure)
 {
 	Vec3 mapped = 1. - Exp((-color) * exposure);
 
-	double g = 1 / 2.2;
+	float g = 1 / 2.2f;
 	return Pow(mapped, Vec3{g, g, g});
 }
 
-double HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, double *_u, double *_v)
+float HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, float *_u, float *_v)
 {
 	Vec3 e0 = v0 - v2;
 	Vec3 e1 = v1 - v2;
 	Vec3 pvec = Cross(ray.direction, e1);
-	double det = Dot(e0, pvec);
+	float det = Dot(e0, pvec);
 
-	if (det > -.0001 && det < .0001)
+	if (det > -.0001f && det < .0001f)
 		return -1;
 
 	Vec3 tvec = ray.origin - v2;
-	double u = Dot(tvec, pvec) / det;
+	float u = Dot(tvec, pvec) / det;
 	if (u < 0 || u > 1)
 		return -1;
 
 	Vec3 qvec = Cross(tvec, e0);
-	double v = Dot(ray.direction, qvec) / det;
+	float v = Dot(ray.direction, qvec) / det;
 	if (v < 0 || u + v > 1)
 		return -1;
 
-	double t = Dot(e1, qvec) / det;
+	float t = Dot(e1, qvec) / det;
 
 	*_u = u;
 	*_v = v;
 
-	if (t > .0001)
+	if (t > .0001f)
 		return t;
 
 	return -1;
 }
 
-double HitSphere(Sphere *sphere, Ray ray)
+float HitSphere(Sphere *sphere, Ray ray)
 {
 	Vec3 oc = sphere->center - ray.origin;
-	double h = Dot(ray.direction, oc);
-	double c = Dot(oc, oc) - sphere->radius*sphere->radius;
-	double delta = h*h - c;
+	float h = Dot(ray.direction, oc);
+	float c = Dot(oc, oc) - sphere->radius*sphere->radius;
+	float delta = h*h - c;
 
-	if (delta < .001)
+	if (delta < .001f)
 		return -1;
 
-	double sqd = sqrt(delta);
-	double distance = h - sqd;
+	float sqd = sqrtf(delta);
+	float distance = h - sqd;
 
-	if (distance < .001) {
+	if (distance < .001f) {
 		distance = h + sqd;
-		if (distance < .001)
+		if (distance < .001f)
 			return -1;
 	}
 
 	return distance;
 }
 
-double HitPlane(Plane *plane, Ray ray)
+float HitPlane(Plane *plane, Ray ray)
 {
-	double denominator = Dot(plane->normal, ray.direction);
-	if (fabs(denominator) < .001)
+	float denominator = Dot(plane->normal, ray.direction);
+	if (fabs(denominator) < .001f)
 		return -1;
 
-	double distance = (plane->d - Dot(ray.origin, plane->normal)) / denominator;
-	if (distance < .001)
+	float distance = (plane->d - Dot(ray.origin, plane->normal)) / denominator;
+	if (distance < .001f)
 		return -1;
 
 	return distance;
@@ -140,14 +140,14 @@ double HitPlane(Plane *plane, Ray ray)
 bool NearestHit(World *world, Ray ray, HitInfo *info)
 {
 	bool hit = false;
-	double min_distance = HUGE_VAL;
+	float min_distance = INFINITY;
 	Vec3 normal, hit_point;
 	int material_idx = -1;
 
 	for (int i = 0; i < world->plane_count; i++) {
 		Plane *plane = &world->planes[i];
 
-		double t = HitPlane(plane, ray);
+		float t = HitPlane(plane, ray);
 
 		if (t > 0 && t < min_distance) {
 			min_distance = t;
@@ -161,7 +161,7 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 	for (int i = 0; i < world->sphere_count; i++) {
 		Sphere *sphere = &world->spheres[i];
 
-		double t = HitSphere(sphere, ray);
+		float t = HitSphere(sphere, ray);
 
 		if (t > 0 && t < min_distance) {
 			hit_point = ray.origin + ray.direction * t;
@@ -175,14 +175,14 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 	for (int i = 0; i < world->triangle_count; i++) {
 		Triangle *tri = &world->triangles[i];
 
-		double u, v;
-		double t = HitTriangle(tri->v0, tri->v1, tri->v2, ray, &u, &v);
+		float u, v;
+		float t = HitTriangle(tri->v0, tri->v1, tri->v2, ray, &u, &v);
 
 		if (t > 0 && t < min_distance) {
 			hit_point = ray.origin + ray.direction * t;
 			material_idx = tri->material_idx;
 
-			double w = 1 - u - v;
+			float w = 1 - u - v;
 			normal = Normalize(tri->n2 * v + tri->n0 * w + tri->n1 * u);
 
 			min_distance = t;
@@ -225,7 +225,7 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 		throughput *= sample.bsdf * fabs(sample.l.z) / sample.pdf;
 
 		if (i > 3) {
-			double roulette_prob = fmax(throughput.x, fmax(throughput.y, throughput.z));
+			float roulette_prob = fmaxf(throughput.x, fmaxf(throughput.y, throughput.z));
 
 			if (Rand(rng_state) > roulette_prob)
 				break;
@@ -240,7 +240,7 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 	return color;
 }
 
-int AddMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness, double ior, double metallic, bool transparent)
+int AddMaterial(World *world, Vec3 albedo, Vec3 emission, float roughness, float ior, float metallic, bool transparent)
 {
 	if (world->material_count >= MAX_MATERIALS)
 		Panic("Too much materials");
@@ -257,22 +257,22 @@ int AddMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness, doub
 	return world->material_count++;
 }
 
-int AddDielectricMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness)
+int AddDielectricMaterial(World *world, Vec3 albedo, Vec3 emission, float roughness)
 {
-	return AddMaterial(world, albedo, emission, roughness, 1.5, 0, false);
+	return AddMaterial(world, albedo, emission, roughness, 1.5f, 0, false);
 }
 
-int AddMetallicMaterial(World *world, Vec3 albedo, Vec3 emission, double roughness)
+int AddMetallicMaterial(World *world, Vec3 albedo, Vec3 emission, float roughness)
 {
 	return AddMaterial(world, albedo, emission, roughness, 0, 1, false);
 }
 
-int AddTransparentMaterial(World *world, Vec3 albedo, Vec3 emission, double ior)
+int AddTransparentMaterial(World *world, Vec3 albedo, Vec3 emission, float ior)
 {
 	return AddMaterial(world, albedo, emission, 0, ior, false, true);
 }
 
-void AddSphere(World *world, Vec3 pos, double radius, int material_idx)
+void AddSphere(World *world, Vec3 pos, float radius, int material_idx)
 {
 	if (world->sphere_count >= MAX_OBJECTS)
 		Panic("Too much spheres");
@@ -284,7 +284,7 @@ void AddSphere(World *world, Vec3 pos, double radius, int material_idx)
 	};
 }
 
-void AddPlane(World *world, Vec3 normal, double d, int material_idx)
+void AddPlane(World *world, Vec3 normal, float d, int material_idx)
 {
 	if (world->plane_count >= MAX_OBJECTS)
 		Panic("Too much planes");
@@ -321,43 +321,43 @@ void LoadCornellBox(World *world)
 	world->triangle_count = 0;
 	world->material_count = 0;
 
-	int khaki = AddMaterial(world, {0.725, 0.71, 0.68}, {0, 0, 0}, 1, 1.5, 0, false);
-	int red = AddMaterial(world, {0.63, 0.065, 0.05}, {0, 0, 0}, 1, 1.5, 0, false);
-	int green = AddMaterial(world, {0.14, 0.45, 0.091}, {0, 0, 0}, 1, 1.5, 0, false);
-	int light = AddMaterial(world, {0, 0, 0}, {17, 12, 4}, 1, 1.5, 0, false);
+	int khaki = AddMaterial(world, {0.725f, 0.71f, 0.68f}, {0, 0, 0}, 1, 1.5f, 0, false);
+	int red = AddMaterial(world, {0.63f, 0.065f, 0.05f}, {0, 0, 0}, 1, 1.5f, 0, false);
+	int green = AddMaterial(world, {0.14f, 0.45f, 0.091f}, {0, 0, 0}, 1, 1.5f, 0, false);
+	int light = AddMaterial(world, {0, 0, 0}, {17, 12, 4}, 1, 1.5f, 0, false);
 
-	AddTriangle(world, {-0.99, -1, 0}, {1.04, 0.99, -0}, {-0.99, 1.01, 0}, khaki);
-	AddTriangle(world, {-0.99, -1, 0}, {1.04, -1, -0}, {1.04, 0.99, -0}, khaki);
-	AddTriangle(world, {1.04, 1.02, 1.99}, {-0.99, -1, 1.99}, {-0.99, 1.02, 1.99}, khaki);
-	AddTriangle(world, {1.04, 1.02, 1.99}, {1.04, -1, 1.99}, {-0.99, -1, 1.99}, khaki);
-	AddTriangle(world, {1.04, 0.99, -0}, {1.04, -1, 1.99}, {1.04, 1.02, 1.99}, khaki);
-	AddTriangle(world, {1.04, 0.99, -0}, {1.04, -1, -0}, {1.04, -1, 1.99}, khaki);
-	AddTriangle(world, {-0.99, -1, 0}, {1.04, -1, 1.99}, {1.04, -1, -0}, green);
-	AddTriangle(world, {-0.99, -1, 0}, {-0.99, -1, 1.99}, {1.04, -1, 1.99}, green);
-	AddTriangle(world, {-0.99, 1.01, 0}, {1.04, 1.02, 1.99}, {-0.99, 1.02, 1.99}, red);
-	AddTriangle(world, {-0.99, 1.01, 0}, {1.04, 0.99, -0}, {1.04, 1.02, 1.99}, red);
-	AddTriangle(world, {-0.75, -0.53, 0.6}, {0, -0.13, 0.6}, {-0.57, 0.05, 0.6}, khaki);
-	AddTriangle(world, {-0.57, 0.05, 0.6}, {-0, -0.13, 0}, {-0.57, 0.05, 0}, khaki);
-	AddTriangle(world, {-0.75, -0.53, 0.6}, {-0.57, 0.05, 0}, {-0.75, -0.53, 0}, khaki);
-	AddTriangle(world, {-0.17, -0.7, 0.6}, {-0.75, -0.53, 0}, {-0.17, -0.7, 0}, khaki);
-	AddTriangle(world, {0, -0.13, 0.6}, {-0.17, -0.7, 0}, {-0, -0.13, 0}, khaki);
-	AddTriangle(world, {-0.75, -0.53, 0.6}, {-0.17, -0.7, 0.6}, {0, -0.13, 0.6}, khaki);
-	AddTriangle(world, {-0.57, 0.05, 0.6}, {0, -0.13, 0.6}, {-0, -0.13, 0}, khaki);
-	AddTriangle(world, {-0.75, -0.53, 0.6}, {-0.57, 0.05, 0.6}, {-0.57, 0.05, 0}, khaki);
-	AddTriangle(world, {-0.17, -0.7, 0.6}, {-0.75, -0.53, 0.6}, {-0.75, -0.53, 0}, khaki);
-	AddTriangle(world, {0, -0.13, 0.6}, {-0.17, -0.7, 0.6}, {-0.17, -0.7, 0}, khaki);
-	AddTriangle(world, {0.09, -0.04, 1.2}, {0.49, 0.71, 1.2}, {-0.09, 0.53, 1.2}, khaki);
-	AddTriangle(world, {-0.09, 0.53, 1.2}, {0.49, 0.71, -0}, {-0.09, 0.53, 0}, khaki);
-	AddTriangle(world, {0.49, 0.71, 1.2}, {0.67, 0.14, -0}, {0.49, 0.71, -0}, khaki);
-	AddTriangle(world, {0.67, 0.14, 1.2}, {0.09, -0.04, -0}, {0.67, 0.14, -0}, khaki);
-	AddTriangle(world, {0.09, -0.04, 1.2}, {-0.09, 0.53, 0}, {0.09, -0.04, -0}, khaki);
-	AddTriangle(world, {0.09, -0.04, 1.2}, {0.67, 0.14, 1.2}, {0.49, 0.71, 1.2}, khaki);
-	AddTriangle(world, {-0.09, 0.53, 1.2}, {0.49, 0.71, 1.2}, {0.49, 0.71, -0}, khaki);
-	AddTriangle(world, {0.49, 0.71, 1.2}, {0.67, 0.14, 1.2}, {0.67, 0.14, -0}, khaki);
-	AddTriangle(world, {0.67, 0.14, 1.2}, {0.09, -0.04, 1.2}, {0.09, -0.04, -0}, khaki);
-	AddTriangle(world, {0.09, -0.04, 1.2}, {-0.09, 0.53, 1.2}, {-0.09, 0.53, 0}, khaki);
-	AddTriangle(world, {0.22, 0.24, 1.98}, {-0.16, -0.23, 1.98}, {-0.16, 0.24, 1.98}, light);
-	AddTriangle(world, {0.22, 0.24, 1.98}, {0.22, -0.23, 1.98}, {-0.16, -0.23, 1.98}, light);
+	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, 0.99f, -0}, {-0.99f, 1.01f, 0}, khaki);
+	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, -1, -0}, {1.04f, 0.99f, -0}, khaki);
+	AddTriangle(world, {1.04f, 1.02f, 1.99f}, {-0.99f, -1, 1.99f}, {-0.99f, 1.02f, 1.99f}, khaki);
+	AddTriangle(world, {1.04f, 1.02f, 1.99f}, {1.04f, -1, 1.99f}, {-0.99f, -1, 1.99f}, khaki);
+	AddTriangle(world, {1.04f, 0.99f, -0}, {1.04f, -1, 1.99f}, {1.04f, 1.02f, 1.99f}, khaki);
+	AddTriangle(world, {1.04f, 0.99f, -0}, {1.04f, -1, -0}, {1.04f, -1, 1.99f}, khaki);
+	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, -1, 1.99f}, {1.04f, -1, -0}, green);
+	AddTriangle(world, {-0.99f, -1, 0}, {-0.99f, -1, 1.99f}, {1.04f, -1, 1.99f}, green);
+	AddTriangle(world, {-0.99f, 1.01f, 0}, {1.04f, 1.02f, 1.99f}, {-0.99f, 1.02f, 1.99f}, red);
+	AddTriangle(world, {-0.99f, 1.01f, 0}, {1.04f, 0.99f, -0}, {1.04f, 1.02f, 1.99f}, red);
+	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {0, -0.13f, 0.6f}, {-0.57f, 0.05f, 0.6f}, khaki);
+	AddTriangle(world, {-0.57f, 0.05f, 0.6f}, {-0, -0.13f, 0}, {-0.57f, 0.05f, 0}, khaki);
+	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.57f, 0.05f, 0}, {-0.75f, -0.53f, 0}, khaki);
+	AddTriangle(world, {-0.17f, -0.7f, 0.6f}, {-0.75f, -0.53f, 0}, {-0.17f, -0.7f, 0}, khaki);
+	AddTriangle(world, {0, -0.13f, 0.6f}, {-0.17f, -0.7f, 0}, {-0, -0.13f, 0}, khaki);
+	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.17f, -0.7f, 0.6f}, {0, -0.13f, 0.6f}, khaki);
+	AddTriangle(world, {-0.57f, 0.05f, 0.6f}, {0, -0.13f, 0.6f}, {-0, -0.13f, 0}, khaki);
+	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.57f, 0.05f, 0.6f}, {-0.57f, 0.05f, 0}, khaki);
+	AddTriangle(world, {-0.17f, -0.7f, 0.6f}, {-0.75f, -0.53f, 0.6f}, {-0.75f, -0.53f, 0}, khaki);
+	AddTriangle(world, {0, -0.13f, 0.6f}, {-0.17f, -0.7f, 0.6f}, {-0.17f, -0.7f, 0}, khaki);
+	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {0.49f, 0.71f, 1.2f}, {-0.09f, 0.53f, 1.2f}, khaki);
+	AddTriangle(world, {-0.09f, 0.53f, 1.2f}, {0.49f, 0.71f, -0}, {-0.09f, 0.53f, 0}, khaki);
+	AddTriangle(world, {0.49f, 0.71f, 1.2f}, {0.67f, 0.14f, -0}, {0.49f, 0.71f, -0}, khaki);
+	AddTriangle(world, {0.67f, 0.14f, 1.2f}, {0.09f, -0.04f, -0}, {0.67f, 0.14f, -0}, khaki);
+	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {-0.09f, 0.53f, 0}, {0.09f, -0.04f, -0}, khaki);
+	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {0.67f, 0.14f, 1.2f}, {0.49f, 0.71f, 1.2f}, khaki);
+	AddTriangle(world, {-0.09f, 0.53f, 1.2f}, {0.49f, 0.71f, 1.2f}, {0.49f, 0.71f, -0}, khaki);
+	AddTriangle(world, {0.49f, 0.71f, 1.2f}, {0.67f, 0.14f, 1.2f}, {0.67f, 0.14f, -0}, khaki);
+	AddTriangle(world, {0.67f, 0.14f, 1.2f}, {0.09f, -0.04f, 1.2f}, {0.09f, -0.04f, -0}, khaki);
+	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {-0.09f, 0.53f, 1.2f}, {-0.09f, 0.53f, 0}, khaki);
+	AddTriangle(world, {0.22f, 0.24f, 1.98f}, {-0.16f, -0.23f, 1.98f}, {-0.16f, 0.24f, 1.98f}, light);
+	AddTriangle(world, {0.22f, 0.24f, 1.98f}, {0.22f, -0.23f, 1.98f}, {-0.16f, -0.23f, 1.98f}, light);
 }
 
 int main()
@@ -368,18 +368,18 @@ int main()
 
 	int width = 400, height = 400;
 	int n_samples = 10;
-	double exposure = 1;
-	double fov = 90;
-	Vec3 camera_position = {-1.9, 0, 1};
+	float exposure = 1;
+	float fov = 90;
+	Vec3 camera_position = {-1.9f, 0, 1};
 	Vec3 looking_at = {0, 0, 1};
 	Vec3 vup = {0, 0, 1};
-	double defocus_angle = -2;
-	double focus_dist = Length(looking_at - camera_position);
+	float defocus_angle = -2;
+	float focus_dist = Length(looking_at - camera_position);
 
-	double fov_radians = fov * M_PI / 180;
-	double aspect_ratio = (double)width/height;
-	double viewport_height = 2 * tan(fov_radians/2) * focus_dist;
-	double viewport_width = viewport_height * aspect_ratio;
+	float fov_radians = fov * PI / 180;
+	float aspect_ratio = (float)width/(float)height;
+	float viewport_height = 2 * tan(fov_radians/2) * focus_dist;
+	float viewport_width = viewport_height * aspect_ratio;
 
 	Vec3 forward = Normalize(looking_at - camera_position);
 	Vec3 right = Normalize(Cross(forward, vup));
@@ -393,11 +393,11 @@ int main()
 		- viewport_u/2
 		- viewport_v/2;
 
-	Vec3 du = viewport_u / width;
-	Vec3 dv = viewport_v / height;
+	Vec3 du = viewport_u / (float)width;
+	Vec3 dv = viewport_v / (float)height;
 
-	double defocus_angle_radians = defocus_angle * M_PI / 180;
-	double defocus_radius = focus_dist * tan(defocus_angle_radians / 2);
+	float defocus_angle_radians = defocus_angle * PI / 180;
+	float defocus_radius = focus_dist * tan(defocus_angle_radians / 2);
 	Vec3 defocus_disk_u = right * defocus_radius;
 	Vec3 defocus_disk_v = up * defocus_radius;
 
@@ -415,21 +415,21 @@ int main()
 		for (int u = 0; u < width; u++) {
 			Vec3 color = {};
 			for (int i = 0; i < n_samples; i++) {
-				double random_u = Rand(&rng_state);
-				double random_v = Rand(&rng_state);
+				float random_u = Rand(&rng_state);
+				float random_v = Rand(&rng_state);
 				
 				Vec2 rand_disk = RandomDisk(&rng_state);
 				Vec3 rand_defocus = camera_position + (rand_disk.x * defocus_disk_u) + (rand_disk.y * defocus_disk_v);
 
 				Vec3 ray_origin = (defocus_angle <= 0) ? camera_position : rand_defocus;
-				Vec3 pixel_center = upper_left + du * (u + random_u) + dv * (v + random_v);
+				Vec3 pixel_center = upper_left + du * ((float)u + random_u) + dv * ((float)v + random_v);
 				Vec3 ray_direction = Normalize(pixel_center - ray_origin);
 				Ray ray = {ray_origin, ray_direction};
 
 				color += RayTrace(&world, ray, &rng_state);
 			}
 
-			color /= n_samples;
+			color /= (float)n_samples;
 			Vec3 mapped = LinearToGamma(color, exposure);
 
 			int pixel_pos = (v * width + u) * 3;
