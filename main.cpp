@@ -28,6 +28,7 @@ struct HitInfo {
 	Vec3 hit_point;
 	Vec3 normal;
 	int material_idx;
+	int triangle_idx;
 };
 
 struct Ray {
@@ -47,6 +48,9 @@ struct World {
 	int triangle_count;
 	Triangle triangles[MAX_OBJECTS];
 
+	int emissive_triangle_count;
+	Triangle emissive_triangles[MAX_OBJECTS];
+
 	int material_count;
 	Material materials[MAX_MATERIALS];
 
@@ -61,6 +65,25 @@ Vec2 RandomDisk(u32 *rng_state) {
 	float y = r * sinf(theta);
 
 	return Vec2{x, y};
+}
+
+
+Vec3 RandomTriangle(u32 *rng_state)
+{
+	float r1 = Rand(rng_state);
+	float r2 = Rand(rng_state);
+
+	float u, v;
+
+	if (r1 < r2) {
+		u = r1 / 2;
+		v = r2 - u;
+	} else {
+		v = r2 / 2;
+		u = r1 - v;
+	}
+
+	return {u, v, 1 - u - v};
 }
 
 Vec3 LinearToGamma(Vec3 color, float exposure)
@@ -105,9 +128,10 @@ float HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, float *_u, float *_v)
 float HitSphere(Sphere *sphere, Ray ray)
 {
 	Vec3 oc = sphere->center - ray.origin;
+	float a = Length2(ray.direction);
 	float h = Dot(ray.direction, oc);
-	float c = Dot(oc, oc) - sphere->radius*sphere->radius;
-	float delta = h*h - c;
+	float c = Length2(oc) - sphere->radius*sphere->radius;
+	float delta = h*h - a*c;
 
 	if (delta < .001f)
 		return -1;
@@ -143,6 +167,7 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 	float min_distance = INFINITY;
 	Vec3 normal, hit_point;
 	int material_idx = -1;
+	int triangle_idx = -1;
 
 	for (int i = 0; i < world->plane_count; i++) {
 		Plane *plane = &world->planes[i];
@@ -181,9 +206,10 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 		if (t > 0 && t < min_distance) {
 			hit_point = ray.origin + ray.direction * t;
 			material_idx = tri->material_idx;
+			triangle_idx = i;
 
 			float w = 1 - u - v;
-			normal = Normalize(tri->n2 * v + tri->n0 * w + tri->n1 * u);
+			normal = Normalize(tri->n0 * u + tri->n1 * v + tri->n2 * w);
 
 			min_distance = t;
 			hit = true;
@@ -193,16 +219,75 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 	info->hit_point = hit_point;
 	info->normal = normal;
 	info->material_idx = material_idx;
+	info->triangle_idx = triangle_idx;
 
 	return hit;
 }
 
+bool Occluded(World *world, Vec3 from, Vec3 to)
+{
+	Ray ray = {from, to - from};
+	float distance = .99f;
+
+	for (int i = 0; i < world->plane_count; i++) {
+		Plane *plane = &world->planes[i];
+
+		float t = HitPlane(plane, ray);
+
+		if (t > 0 && t < distance) {
+			return true;
+		}
+	}
+
+	for (int i = 0; i < world->sphere_count; i++) {
+		Sphere *sphere = &world->spheres[i];
+
+		float t = HitSphere(sphere, ray);
+
+		if (t > 0 && t < distance) {
+			return true;
+		}
+	}
+
+	for (int i = 0; i < world->triangle_count; i++) {
+		Triangle *tri = &world->triangles[i];
+
+		float u, v;
+		float t = HitTriangle(tri->v0, tri->v1, tri->v2, ray, &u, &v);
+
+		if (t > 0 && t < distance) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+float PowerHeuristic(float f_pdf, float g_pdf)
+{
+	return f_pdf*f_pdf / (f_pdf*f_pdf + g_pdf*g_pdf);
+}
+
+float TrianglePDF(Triangle *triangle, Vec3 point, Vec3 triangle_point, Vec3 triangle_normal)
+{
+	Vec3 direction = point - triangle_point;
+
+	Vec3 e0 = triangle->v1 - triangle->v0;
+	Vec3 e1 = triangle->v2 - triangle->v0;
+	float area = Length(Cross(e0, e1)) / 2;
+
+	return Length2(direction) / (Dot(triangle_normal, Normalize(direction))) / area;
+}
+
 Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 {
+	bool sample_lights = world->emissive_triangle_count > 0;
+
 	int max_bounces = 10;
 
 	Vec3 color = {};
 	Vec3 throughput = {1, 1, 1};
+	float bsdf_pdf = 1;
 
 	for (int i = 0; i < max_bounces; i++) {
 		HitInfo hit;
@@ -213,16 +298,62 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 			break;
 		}
 
+		bool facing_forward = true;
+		if (Dot(ray.direction, hit.normal) > 0) {
+			hit.normal = -hit.normal;
+			facing_forward = false;
+		}
+
 		Material mat = world->materials[hit.material_idx];
-		color += throughput * mat.emission;
 
 		Mat3 global_basis = OrthoNormalBasis(hit.normal);
 		Mat3 local_basis = Transpose(global_basis);
 
 		Vec3 v = local_basis * -ray.direction;
+
+		if (facing_forward && (mat.emission.x > 0 || mat.emission.y > 0 || mat.emission.z > 0)) {
+			if (i == 0 || !sample_lights || hit.triangle_idx < 0) {
+				color += throughput * mat.emission;
+			} else {
+				float pmf = 1.f / (float)world->emissive_triangle_count;
+				float light_pdf = pmf * TrianglePDF(&world->triangles[hit.triangle_idx], ray.origin, hit.hit_point, hit.normal); 
+				float mis_weight = PowerHeuristic(bsdf_pdf, light_pdf);
+
+				Assert(light_pdf > 0);
+
+				color += throughput * mat.emission * mis_weight;
+			}
+		}
+
+		if (sample_lights) {
+			u32 rand_idx = Rand(rng_state, 0, world->emissive_triangle_count-1);
+			Triangle *light = &world->emissive_triangles[rand_idx];
+
+			Vec3 uvw = RandomTriangle(rng_state);
+			Vec3 light_point = uvw.x * light->v0 + uvw.y * light->v1 + uvw.z * light->v2;
+			Vec3 light_normal = Normalize(uvw.x * light->n0 + uvw.y * light->n1 + uvw.z * light->n2);
+
+			Vec3 light_direction = light_point - hit.hit_point;
+			Vec3 l = local_basis * Normalize(light_direction);
+
+			if (Dot(light_direction, light_normal) < 0 &&
+			    Dot(light_direction, hit.normal) > 0 &&
+			    !Occluded(world, light_point, hit.hit_point)) {
+				float pmf = 1.f / (float)world->emissive_triangle_count;
+				float light_pdf = pmf * TrianglePDF(light, hit.hit_point, light_point, light_normal); 
+				float b_pdf = BSDFPDF(v, l, mat);
+				float mis_weight = PowerHeuristic(light_pdf, b_pdf);
+
+				Assert(light_pdf > 0);
+
+				Material mat_light = world->materials[light->material_idx];
+				color += throughput * mat_light.emission * BSDF(v, l, mat) * mis_weight / light_pdf;
+			}
+		}
+
 		Sample sample = SampleBSDF(v, mat, rng_state);
 
-		throughput *= sample.bsdf * fabs(sample.l.z) / sample.pdf;
+		throughput *= sample.bsdf / sample.pdf;
 
 		if (i > 3) {
 			float roulette_prob = fmaxf(throughput.x, fmaxf(throughput.y, throughput.z));
@@ -235,6 +366,9 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 
 		ray.origin = hit.hit_point;
 		ray.direction = global_basis * sample.l;
+
+		Assert(fabsf(Length(ray.direction) - 1) < .0001f);
+		bsdf_pdf = sample.pdf;
 	}
 
 	return color;
@@ -305,11 +439,19 @@ void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, int material_idx)
 	Vec3 e1 = v2 - v0;
 	Vec3 normal = Normalize(Cross(e0, e1));
 
-	world->triangles[world->triangle_count++] = {
+	Triangle tri = {
 		material_idx,
 		v0, v1, v2,
 		normal, normal, normal
 	};
+
+	world->triangles[world->triangle_count++] = tri;
+
+	Vec3 emission = world->materials[material_idx].emission;
+
+	if (emission.x > 0 || emission.y > 0 || emission.z > 0)
+		world->emissive_triangles[world->emissive_triangle_count++] = tri;
+
 }
 
 void LoadCornellBox(World *world)
@@ -319,6 +461,7 @@ void LoadCornellBox(World *world)
 	world->sphere_count = 0;
 	world->plane_count = 0;
 	world->triangle_count = 0;
+	world->emissive_triangle_count = 0;
 	world->material_count = 0;
 
 	int khaki = AddMaterial(world, {0.725f, 0.71f, 0.68f}, {0, 0, 0}, 1, 1.5f, 0, false);
@@ -367,7 +510,7 @@ int main()
 	LoadCornellBox(&world);
 
 	int width = 400, height = 400;
-	int n_samples = 10;
+	int n_samples = 200;
 	float exposure = 1;
 	float fov = 90;
 	Vec3 camera_position = {-1.9f, 0, 1};
@@ -430,6 +573,10 @@ int main()
 			}
 
 			color /= (float)n_samples;
+			if (color.x < 0 || color.y < 0 || color.z < 0)
+				color = {0, 0, 1};
+			if (isnan(color.x) || isnan(color.y) || isnan(color.z))
+				color = {0, 1, 0};
 			Vec3 mapped = LinearToGamma(color, exposure);
 
 			int pixel_pos = (v * width + u) * 3;

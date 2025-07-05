@@ -6,15 +6,19 @@ struct Material {
 	float ior;
 	float metallic;
 
-	bool transparent;
+	bool transmissive;
 };
-
 
 struct Sample {
 	Vec3 bsdf;
 	float pdf;
 	Vec3 l;
 };
+
+bool IsSpecular(Material *mat)
+{
+	return mat->transmissive;
+}
 
 Vec3 CosineWeightedSample(u32 *rng_state)
 {
@@ -33,7 +37,7 @@ Vec3 CosineWeightedSample(u32 *rng_state)
 
 float CosineWeightedPDF(Vec3 l)
 {
-	return l.z * INV_PI;
+	return l.z / PI;
 }
 
 /*
@@ -55,7 +59,7 @@ Vec3 GGXVNDFSample(Vec3 v, float roughness, u32 *rng_state)
 
 	float p1 = r*cosf(phi);
 	float p2 = r*sinf(phi);
-	float s = .5f * (1 + vh.z);
+	float s = (1 + vh.z) / 2;
 	p2 = (1 - s) * sqrtf(fmaxf(0, 1 - p1 * p1)) + s * p2;
 
 	Vec3 n = p1*t1 + p2*t2 + sqrtf(fmaxf(0, 1 - p1*p1 - p2*p2))*vh;
@@ -75,12 +79,25 @@ float GGXVNDFPDF(Vec3 v, Vec3 l, float roughness)
 
 	float vis_v = 1 / (fabsf(v.z) + sqrtf(alpha2 + (1 - alpha2) * v.z * v.z));
 
-	return ndf * vis_v * .5f;
+	return ndf * vis_v / 2;
 }
 
 Vec3 Fresnel(float cosine, Vec3 f0)
 {
 	return f0 + (Vec3{1, 1, 1} - f0) * powf(1 - cosine, 5);
+}
+
+float Fresnel(float cosine, float ri)
+{
+	cosine = fminf(cosine, 1);
+	float sin2theta = (1 - cosine*cosine);
+
+	if (sin2theta * ri*ri >= 1)
+		return 1;
+
+	float r0 = (1 - ri) / (1 + ri);
+	r0 = r0*r0;
+	return r0 + (1 - r0) * powf(1 - cosine, 5);
 }
 
 /*
@@ -95,8 +112,8 @@ Vec3 BSDF(Vec3 v, Vec3 l, Material mat)
 	float alpha2 = alpha * alpha;
 
 	// GGX normal distribution function
-	float n_dot_h = fabs(h.z);
-	float ndf = alpha2 * INV_PI / powf(powf(n_dot_h, 2) * (alpha2 - 1) + 1, 2);
+	float n_dot_h = fabsf(h.z);
+	float ndf = alpha2 / (PI * powf(powf(n_dot_h, 2) * (alpha2 - 1) + 1, 2));
 
 	// Visibility function
 	float n_dot_v = fabsf(v.z);
@@ -116,14 +133,14 @@ Vec3 BSDF(Vec3 v, Vec3 l, Material mat)
 	float h_dot_v = fabsf(Dot(h, v));
 	Vec3 fresnel = Fresnel(h_dot_v, f0);
 
-	Vec3 diffuse = (Vec3{1, 1, 1} - fresnel) * mat.albedo * INV_PI * (1 - mat.metallic);
+	Vec3 diffuse = (Vec3{1, 1, 1} - fresnel) * mat.albedo / PI * (1 - mat.metallic);
 
 	Vec3 specular = fresnel * (vis * ndf);
 
-	return diffuse + specular;
+	return (diffuse + specular) * l.z;
 }
 
-Sample SampleBSDF(Vec3 v, Material mat, u32 *rng_state)
+void GetWeights(Material mat, float *_cosine_weight, float *_vndf_weight)
 {
 	float cosine_weight = 1 - mat.metallic;
 	float vndf_weight = 1 - cosine_weight * mat.roughness;
@@ -133,6 +150,34 @@ Sample SampleBSDF(Vec3 v, Material mat, u32 *rng_state)
 	vndf_weight /= sum_weights;
 	cosine_weight /= sum_weights;
 
+	*_cosine_weight = cosine_weight;
+	*_vndf_weight = vndf_weight;
+}
+
+float BSDFPDF(Vec3 v, Vec3 l, Material mat)
+{
+	if (IsSpecular(&mat))
+		return 0;
+
+	float cosine_weight;
+	float vndf_weight;
+
+	GetWeights(mat, &cosine_weight, &vndf_weight);
+
+	float cosine_pdf = CosineWeightedPDF(l);
+	float vndf_pdf = GGXVNDFPDF(v, l, mat.roughness);
+
+	return cosine_pdf * cosine_weight + vndf_pdf * vndf_weight;
+}
+
+Sample SampleBSDF(Vec3 v, Material mat, u32 *rng_state)
+{
+	Sample samp = {};
+	float cosine_weight;
+	float vndf_weight;
+
+	GetWeights(mat, &cosine_weight, &vndf_weight);
+
 	Vec3 l;
 	if (Rand(rng_state) < cosine_weight) {
 		l = CosineWeightedSample(rng_state);
@@ -140,14 +185,11 @@ Sample SampleBSDF(Vec3 v, Material mat, u32 *rng_state)
 		l = GGXVNDFSample(v, mat.roughness, rng_state);
 	}
 
-	float cosine_pdf = CosineWeightedPDF(l);
-	float vndf_pdf = GGXVNDFPDF(v, l, mat.roughness);
+	float pdf = BSDFPDF(v, l, mat);
 
-	float pdf = cosine_pdf * cosine_weight + vndf_pdf * vndf_weight;
+	samp.bsdf = BSDF(v, l, mat);
+	samp.pdf = pdf;
+	samp.l = l;
 
-	return Sample{
-		BSDF(v, l, mat),
-		pdf,
-		l
-	};
+	return samp;
 }
