@@ -42,9 +42,6 @@ struct World {
 	int sphere_count;
 	Sphere spheres[MAX_OBJECTS];
 
-	int plane_count;
-	Plane planes[MAX_OBJECTS];
-
 	int triangle_count;
 	Triangle triangles[MAX_OBJECTS];
 
@@ -102,17 +99,17 @@ float HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, float *_u, float *_v)
 	float det = Dot(e0, pvec);
 
 	if (det > -.0001f && det < .0001f)
-		return -1;
+		return INFINITY;
 
 	Vec3 tvec = ray.origin - v2;
 	float u = Dot(tvec, pvec) / det;
 	if (u < 0 || u > 1)
-		return -1;
+		return INFINITY;
 
 	Vec3 qvec = Cross(tvec, e0);
 	float v = Dot(ray.direction, qvec) / det;
 	if (v < 0 || u + v > 1)
-		return -1;
+		return INFINITY;
 
 	float t = Dot(e1, qvec) / det;
 
@@ -122,7 +119,7 @@ float HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, float *_u, float *_v)
 	if (t > .0001f)
 		return t;
 
-	return -1;
+	return INFINITY;
 }
 
 float HitSphere(Sphere *sphere, Ray ray)
@@ -134,7 +131,7 @@ float HitSphere(Sphere *sphere, Ray ray)
 	float delta = h*h - a*c;
 
 	if (delta < .001f)
-		return -1;
+		return INFINITY;
 
 	float sqd = sqrtf(delta);
 	float distance = h - sqd;
@@ -142,21 +139,8 @@ float HitSphere(Sphere *sphere, Ray ray)
 	if (distance < .001f) {
 		distance = h + sqd;
 		if (distance < .001f)
-			return -1;
+			return INFINITY;
 	}
-
-	return distance;
-}
-
-float HitPlane(Plane *plane, Ray ray)
-{
-	float denominator = Dot(plane->normal, ray.direction);
-	if (fabs(denominator) < .001f)
-		return -1;
-
-	float distance = (plane->d - Dot(ray.origin, plane->normal)) / denominator;
-	if (distance < .001f)
-		return -1;
 
 	return distance;
 }
@@ -169,26 +153,12 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 	int material_idx = -1;
 	int triangle_idx = -1;
 
-	for (int i = 0; i < world->plane_count; i++) {
-		Plane *plane = &world->planes[i];
-
-		float t = HitPlane(plane, ray);
-
-		if (t > 0 && t < min_distance) {
-			min_distance = t;
-			hit_point = ray.origin + ray.direction * t;
-			material_idx = plane->material_idx;
-			normal = plane->normal;
-			hit = true;
-		}
-	}
-
 	for (int i = 0; i < world->sphere_count; i++) {
 		Sphere *sphere = &world->spheres[i];
 
 		float t = HitSphere(sphere, ray);
 
-		if (t > 0 && t < min_distance) {
+		if (t < min_distance) {
 			hit_point = ray.origin + ray.direction * t;
 			normal = (hit_point - sphere->center) / sphere->radius;
 			material_idx = sphere->material_idx;
@@ -203,7 +173,7 @@ bool NearestHit(World *world, Ray ray, HitInfo *info)
 		float u, v;
 		float t = HitTriangle(tri->v0, tri->v1, tri->v2, ray, &u, &v);
 
-		if (t > 0 && t < min_distance) {
+		if (t < min_distance) {
 			hit_point = ray.origin + ray.direction * t;
 			material_idx = tri->material_idx;
 			triangle_idx = i;
@@ -229,22 +199,12 @@ bool Occluded(World *world, Vec3 from, Vec3 to)
 	Ray ray = {from, to - from};
 	float distance = .99f;
 
-	for (int i = 0; i < world->plane_count; i++) {
-		Plane *plane = &world->planes[i];
-
-		float t = HitPlane(plane, ray);
-
-		if (t > 0 && t < distance) {
-			return true;
-		}
-	}
-
 	for (int i = 0; i < world->sphere_count; i++) {
 		Sphere *sphere = &world->spheres[i];
 
 		float t = HitSphere(sphere, ray);
 
-		if (t > 0 && t < distance) {
+		if (t < distance) {
 			return true;
 		}
 	}
@@ -255,7 +215,7 @@ bool Occluded(World *world, Vec3 from, Vec3 to)
 		float u, v;
 		float t = HitTriangle(tri->v0, tri->v1, tri->v2, ray, &u, &v);
 
-		if (t > 0 && t < distance) {
+		if (t < distance) {
 			return true;
 		}
 	}
@@ -418,18 +378,6 @@ void AddSphere(World *world, Vec3 pos, float radius, int material_idx)
 	};
 }
 
-void AddPlane(World *world, Vec3 normal, float d, int material_idx)
-{
-	if (world->plane_count >= MAX_OBJECTS)
-		Panic("Too much planes");
-
-	world->planes[world->plane_count++] = {
-		material_idx,
-		normal,
-		d
-	};
-}
-
 void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, int material_idx)
 {
 	if (world->triangle_count >= MAX_OBJECTS)
@@ -459,7 +407,6 @@ void LoadCornellBox(World *world)
 	world->sun_color = {};
 
 	world->sphere_count = 0;
-	world->plane_count = 0;
 	world->triangle_count = 0;
 	world->emissive_triangle_count = 0;
 	world->material_count = 0;
@@ -510,7 +457,7 @@ int main()
 	LoadCornellBox(&world);
 
 	int width = 400, height = 400;
-	int n_samples = 200;
+	int n_samples = 20;
 	float exposure = 1;
 	float fov = 90;
 	Vec3 camera_position = {-1.9f, 0, 1};

@@ -61,7 +61,7 @@ u32 _rand(u32 *rng_state)
 
 float Rand(u32 *rng_state)
 {
-	return (float)(_rand(rng_state) >> 8) / (float)(1<<24);
+	return (float)(_rand(rng_state) >> 8) / (1<<24);
 }
 
 u32 Rand(u32 *rng_state, u32 min, u32 max)
