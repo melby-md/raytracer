@@ -1,12 +1,8 @@
 struct Material {
-	Vec3 albedo;
-	Vec3 emission;
-
+	Vec3 color;
 	float roughness;
 	float ior;
 	float metallic;
-
-	bool transmissive;
 };
 
 struct Sample {
@@ -14,11 +10,6 @@ struct Sample {
 	float pdf;
 	Vec3 l;
 };
-
-bool IsSpecular(Material *mat)
-{
-	return mat->transmissive;
-}
 
 Vec3 CosineWeightedSample(u32 *rng_state)
 {
@@ -37,7 +28,7 @@ Vec3 CosineWeightedSample(u32 *rng_state)
 
 float CosineWeightedPDF(Vec3 l)
 {
-	return l.z / PI;
+	return fmaxf(l.z, 0) / PI;
 }
 
 /*
@@ -70,10 +61,13 @@ Vec3 GGXVNDFSample(Vec3 v, float roughness, u32 *rng_state)
 
 float GGXVNDFPDF(Vec3 v, Vec3 l, float roughness)
 {
+	Vec3 h = Normalize(v + l);
+
+	if (Dot(h, v) <= 0)
+		return 0;
+
 	float alpha = roughness * roughness;
 	float alpha2 = alpha * alpha;
-
-	Vec3 h = Normalize(v + l);
 
 	float ndf = alpha2 / (PI * powf(h.z * h.z * (alpha2 - 1) + 1, 2));
 
@@ -84,20 +78,7 @@ float GGXVNDFPDF(Vec3 v, Vec3 l, float roughness)
 
 Vec3 Fresnel(float cosine, Vec3 f0)
 {
-	return f0 + (Vec3{1, 1, 1} - f0) * powf(1 - cosine, 5);
-}
-
-float Fresnel(float cosine, float ri)
-{
-	cosine = fminf(cosine, 1);
-	float sin2theta = (1 - cosine*cosine);
-
-	if (sin2theta * ri*ri >= 1)
-		return 1;
-
-	float r0 = (1 - ri) / (1 + ri);
-	r0 = r0*r0;
-	return r0 + (1 - r0) * powf(1 - cosine, 5);
+	return f0 + (1 - f0) * powf(1 - cosine, 5);
 }
 
 /*
@@ -106,34 +87,33 @@ float Fresnel(float cosine, float ri)
  */
 Vec3 BSDF(Vec3 v, Vec3 l, Material mat)
 {
+	Assert(v.z > 0);
+
+	if (l.z <= 0)
+		return {};
+
 	Vec3 h = Normalize(v + l);
 
 	float alpha = mat.roughness * mat.roughness;
 	float alpha2 = alpha * alpha;
 
 	// GGX normal distribution function
-	float n_dot_h = fabsf(h.z);
-	float ndf = alpha2 / (PI * powf(powf(n_dot_h, 2) * (alpha2 - 1) + 1, 2));
+	float ndf = alpha2 / (PI * powf(powf(h.z, 2) * (alpha2 - 1) + 1, 2));
 
 	// Visibility function
-	float n_dot_v = fabsf(v.z);
-	float n_dot_l = fabsf(l.z);
-
-	float vis_v = n_dot_l * sqrtf(n_dot_v * n_dot_v * (1 - alpha2) + alpha2);
-	float vis_l = n_dot_v * sqrtf(n_dot_l * n_dot_l * (1 - alpha2) + alpha2);
+	float vis_v = l.z * sqrtf(v.z * v.z * (1 - alpha2) + alpha2);
+	float vis_l = v.z * sqrtf(l.z * l.z * (1 - alpha2) + alpha2);
 
 	float vis = .5f / (vis_v + vis_l);
 
 	// Fresnel term
-	float r0 = powf((1 - mat.ior) / (1 + mat.ior), 2);
-	Vec3 dielectric_fresnel = Vec3{r0, r0, r0};
+	Vec3 dielectric_f0 = V3(powf((1 - mat.ior) / (1 + mat.ior), 2));
 
-	Vec3 f0 = Lerp(dielectric_fresnel, mat.albedo, mat.metallic);
+	Vec3 f0 = Lerp(dielectric_f0, mat.color, mat.metallic);
 
-	float h_dot_v = fabsf(Dot(h, v));
-	Vec3 fresnel = Fresnel(h_dot_v, f0);
+	Vec3 fresnel = Fresnel(Dot(h, v), f0);
 
-	Vec3 diffuse = (Vec3{1, 1, 1} - fresnel) * mat.albedo / PI * (1 - mat.metallic);
+	Vec3 diffuse = (1 - fresnel) * mat.color / PI * (1 - mat.metallic);
 
 	Vec3 specular = fresnel * (vis * ndf);
 
@@ -156,9 +136,6 @@ void GetWeights(Material mat, float *_cosine_weight, float *_vndf_weight)
 
 float BSDFPDF(Vec3 v, Vec3 l, Material mat)
 {
-	if (IsSpecular(&mat))
-		return 0;
-
 	float cosine_weight;
 	float vndf_weight;
 

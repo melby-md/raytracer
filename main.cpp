@@ -5,48 +5,56 @@
 #include "bmp.hpp"
 #include "bsdf.hpp"
 
-struct Sphere {
-	int material_idx;
-
-	Vec3 center;
-	float radius;
+enum class ObjectType {
+	TRIANGLE,
+	SPHERE
 };
 
-struct Plane {
-	int material_idx;
-	Vec3 normal;
-	float d;
+struct Light {
+	Vec3 color;
+	i32 object_idx;
 };
 
 struct Triangle {
-	int material_idx;
 	Vec3 v0, v1, v2;
 	Vec3 n0, n1, n2;
 };
 
-struct HitInfo {
-	Vec3 hit_point;
+struct Sphere {
+	Vec3 center;
+	float radius;
+};
+
+struct Object {
+	ObjectType type;
+	i32 material_idx;
+	i32 light_idx;
+	union {
+		Triangle triangle;
+		Sphere sphere;
+	};
+};
+
+struct Hit {
+	Vec3 point;
 	Vec3 normal;
-	int material_idx;
-	int triangle_idx;
+	i32 obj_idx;
 };
 
 struct Ray {
 	Vec3 origin, direction;
 };
 
-constexpr int MAX_OBJECTS = 64;
-constexpr int MAX_MATERIALS = 64;
+constexpr i32 MAX_OBJECTS = 64;
+constexpr i32 MAX_MATERIALS = 64;
+constexpr i32 MAX_LIGHTS = 64;
 
 struct World {
-	int sphere_count;
-	Sphere spheres[MAX_OBJECTS];
+	int object_count;
+	Object objects[MAX_OBJECTS];
 
-	int triangle_count;
-	Triangle triangles[MAX_OBJECTS];
-
-	int emissive_triangle_count;
-	Triangle emissive_triangles[MAX_OBJECTS];
+	int light_count;
+	Light lights[MAX_LIGHTS];
 
 	int material_count;
 	Material materials[MAX_MATERIALS];
@@ -63,7 +71,6 @@ Vec2 RandomDisk(u32 *rng_state) {
 
 	return Vec2{x, y};
 }
-
 
 Vec3 RandomTriangle(u32 *rng_state)
 {
@@ -87,21 +94,20 @@ Vec3 LinearToGamma(Vec3 color, float exposure)
 {
 	Vec3 mapped = 1. - Exp((-color) * exposure);
 
-	float g = 1 / 2.2f;
-	return Pow(mapped, Vec3{g, g, g});
+	return Pow(mapped, V3(1 / 2.2f));
 }
 
-float HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, float *_u, float *_v)
+float HitTriangle(Triangle *tri, Ray ray, float *_u, float *_v)
 {
-	Vec3 e0 = v0 - v2;
-	Vec3 e1 = v1 - v2;
+	Vec3 e0 = tri->v0 - tri->v2;
+	Vec3 e1 = tri->v1 - tri->v2;
 	Vec3 pvec = Cross(ray.direction, e1);
 	float det = Dot(e0, pvec);
 
 	if (det > -.0001f && det < .0001f)
 		return INFINITY;
 
-	Vec3 tvec = ray.origin - v2;
+	Vec3 tvec = ray.origin - tri->v2;
 	float u = Dot(tvec, pvec) / det;
 	if (u < 0 || u > 1)
 		return INFINITY;
@@ -125,10 +131,9 @@ float HitTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Ray ray, float *_u, float *_v)
 float HitSphere(Sphere *sphere, Ray ray)
 {
 	Vec3 oc = sphere->center - ray.origin;
-	float a = Length2(ray.direction);
 	float h = Dot(ray.direction, oc);
 	float c = Length2(oc) - sphere->radius*sphere->radius;
-	float delta = h*h - a*c;
+	float delta = h*h - c;
 
 	if (delta < .001f)
 		return INFINITY;
@@ -145,78 +150,68 @@ float HitSphere(Sphere *sphere, Ray ray)
 	return distance;
 }
 
-bool NearestHit(World *world, Ray ray, HitInfo *info)
+bool NearestHit(World *world, Ray ray, Hit *hit)
 {
-	bool hit = false;
 	float min_distance = INFINITY;
-	Vec3 normal, hit_point;
-	int material_idx = -1;
-	int triangle_idx = -1;
+	Vec3 normal, point;
+	i32 obj_idx = -1;
 
-	for (int i = 0; i < world->sphere_count; i++) {
-		Sphere *sphere = &world->spheres[i];
+	for (i32 i = 0; i < world->object_count; i++) {
+		Object *obj = &world->objects[i];
 
-		float t = HitSphere(sphere, ray);
+		float t;
+		switch (obj->type) {
+		case ObjectType::SPHERE:
+			t = HitSphere(&obj->sphere, ray);
+			if (t < min_distance) {
+				point = ray.origin + ray.direction * t;
+				normal = (point - obj->sphere.center) / obj->sphere.radius;
 
-		if (t < min_distance) {
-			hit_point = ray.origin + ray.direction * t;
-			normal = (hit_point - sphere->center) / sphere->radius;
-			material_idx = sphere->material_idx;
-			min_distance = t;
-			hit = true;
+				obj_idx = i;
+				min_distance = t;
+			}
+			break;
+
+		case ObjectType::TRIANGLE:
+			float u, v;
+			t = HitTriangle(&obj->triangle, ray, &u, &v);
+			if (t < min_distance) {
+				point = ray.origin + ray.direction * t;
+
+				float w = 1 - u - v;
+				normal = Normalize(obj->triangle.n0 * u + obj->triangle.n1 * v + obj->triangle.n2 * w);
+
+				obj_idx = i;
+				min_distance = t;
+			}
 		}
 	}
 
-	for (int i = 0; i < world->triangle_count; i++) {
-		Triangle *tri = &world->triangles[i];
+	hit->point = point;
+	hit->normal = normal;
+	hit->obj_idx = obj_idx;
 
-		float u, v;
-		float t = HitTriangle(tri->v0, tri->v1, tri->v2, ray, &u, &v);
-
-		if (t < min_distance) {
-			hit_point = ray.origin + ray.direction * t;
-			material_idx = tri->material_idx;
-			triangle_idx = i;
-
-			float w = 1 - u - v;
-			normal = Normalize(tri->n0 * u + tri->n1 * v + tri->n2 * w);
-
-			min_distance = t;
-			hit = true;
-		}
-	}
-
-	info->hit_point = hit_point;
-	info->normal = normal;
-	info->material_idx = material_idx;
-	info->triangle_idx = triangle_idx;
-
-	return hit;
+	return obj_idx >= 0;
 }
 
-bool Occluded(World *world, Vec3 from, Vec3 to)
+bool Occluded(World *world, Ray ray, float distance)
 {
-	Ray ray = {from, to - from};
-	float distance = .99f;
+	for (i32 i = 0; i < world->object_count; i++) {
+		Object *obj = &world->objects[i];
 
-	for (int i = 0; i < world->sphere_count; i++) {
-		Sphere *sphere = &world->spheres[i];
+		float t;
+		switch (obj->type) {
+		case ObjectType::SPHERE:
+			t = HitSphere(&obj->sphere, ray);
+			if (t < distance)
+				return true;
+			break;
 
-		float t = HitSphere(sphere, ray);
-
-		if (t < distance) {
-			return true;
-		}
-	}
-
-	for (int i = 0; i < world->triangle_count; i++) {
-		Triangle *tri = &world->triangles[i];
-
-		float u, v;
-		float t = HitTriangle(tri->v0, tri->v1, tri->v2, ray, &u, &v);
-
-		if (t < distance) {
-			return true;
+		case ObjectType::TRIANGLE:
+			float u, v;
+			t = HitTriangle(&obj->triangle, ray, &u, &v);
+			if (t < distance)
+				return true;
 		}
 	}
 
@@ -230,18 +225,18 @@ float PowerHeuristic(float f_pdf, float g_pdf)
 
 float TrianglePDF(Triangle *triangle, Vec3 point, Vec3 triangle_point, Vec3 triangle_normal)
 {
-	Vec3 direction = point - triangle_point;
-
 	Vec3 e0 = triangle->v1 - triangle->v0;
 	Vec3 e1 = triangle->v2 - triangle->v0;
 	float area = Length(Cross(e0, e1)) / 2;
 
-	return Length2(direction) / (Dot(triangle_normal, Normalize(direction))) / area;
+	Vec3 direction = Normalize(point - triangle_point);
+	float length2 = Length2(point - triangle_point);
+	return length2 / Dot(triangle_normal, direction) / area;
 }
 
 Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 {
-	bool sample_lights = world->emissive_triangle_count > 0;
+	bool sample_lights = world->light_count > 0;
 
 	int max_bounces = 10;
 
@@ -250,7 +245,7 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 	float bsdf_pdf = 1;
 
 	for (int i = 0; i < max_bounces; i++) {
-		HitInfo hit;
+		Hit hit;
 		bool did_hit = NearestHit(world, ray, &hit);
 
 		if (!did_hit) {
@@ -264,50 +259,54 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 			facing_forward = false;
 		}
 
-		Material mat = world->materials[hit.material_idx];
+		Object *obj = &world->objects[hit.obj_idx];
+		Material mat = world->materials[obj->material_idx];
+		Light *light = obj->light_idx >= 0 ? &world->lights[obj->light_idx] : nullptr;
 
 		Mat3 global_basis = OrthoNormalBasis(hit.normal);
 		Mat3 local_basis = Transpose(global_basis);
 
 		Vec3 v = local_basis * -ray.direction;
 
-		if (facing_forward && (mat.emission.x > 0 || mat.emission.y > 0 || mat.emission.z > 0)) {
-			if (i == 0 || !sample_lights || hit.triangle_idx < 0) {
-				color += throughput * mat.emission;
+		if (facing_forward && light != nullptr) {
+			if (i == 0 || !sample_lights) {
+				color += throughput * light->color;
 			} else {
-				float pmf = 1.f / (float)world->emissive_triangle_count;
-				float light_pdf = pmf * TrianglePDF(&world->triangles[hit.triangle_idx], ray.origin, hit.hit_point, hit.normal); 
+				float pmf = 1.f / (float)world->light_count;
+				float light_pdf = pmf * TrianglePDF(&obj->triangle, ray.origin, hit.point, hit.normal); 
 				float mis_weight = PowerHeuristic(bsdf_pdf, light_pdf);
 
 				Assert(light_pdf > 0);
 
-				color += throughput * mat.emission * mis_weight;
+				color += throughput * light->color * mis_weight;
 			}
 		}
 
 		if (sample_lights) {
-			u32 rand_idx = Rand(rng_state, 0, world->emissive_triangle_count-1);
-			Triangle *light = &world->emissive_triangles[rand_idx];
+			u32 rand_idx = Rand(rng_state, 0, world->light_count-1);
+			Light *sampled_light = &world->lights[rand_idx];
+			Triangle *tri = &world->objects[sampled_light->object_idx].triangle;
 
 			Vec3 uvw = RandomTriangle(rng_state);
-			Vec3 light_point = uvw.x * light->v0 + uvw.y * light->v1 + uvw.z * light->v2;
-			Vec3 light_normal = Normalize(uvw.x * light->n0 + uvw.y * light->n1 + uvw.z * light->n2);
+			Vec3 light_point = uvw.x * tri->v0 + uvw.y * tri->v1 + uvw.z * tri->v2;
+			Vec3 light_normal = Normalize(uvw.x * tri->n0 + uvw.y * tri->n1 + uvw.z * tri->n2);
 
-			Vec3 light_direction = light_point - hit.hit_point;
-			Vec3 l = local_basis * Normalize(light_direction);
+			Vec3 light_direction = light_point - hit.point;
+			float light_distance = Length(light_direction);
+			light_direction /= light_distance;
+			Ray shadow_ray = {hit.point, light_direction};
+			Vec3 l = local_basis * light_direction;
 
 			if (Dot(light_direction, light_normal) < 0 &&
-			    Dot(light_direction, hit.normal) > 0 &&
-			    !Occluded(world, light_point, hit.hit_point)) {
-				float pmf = 1.f / (float)world->emissive_triangle_count;
-				float light_pdf = pmf * TrianglePDF(light, hit.hit_point, light_point, light_normal); 
+			   !Occluded(world, shadow_ray, light_distance - .0001f)) {
+				float pmf = 1.f / (float)world->light_count;
+				float light_pdf = pmf * TrianglePDF(tri, hit.point, light_point, light_normal); 
 				float b_pdf = BSDFPDF(v, l, mat);
 				float mis_weight = PowerHeuristic(light_pdf, b_pdf);
 
 				Assert(light_pdf > 0);
 
-				Material mat_light = world->materials[light->material_idx];
-				color += throughput * mat_light.emission * BSDF(v, l, mat) * mis_weight / light_pdf;
+				color += throughput * sampled_light->color * BSDF(v, l, mat) * mis_weight / light_pdf;
 			}
 		}
 
@@ -316,7 +315,7 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 		throughput *= sample.bsdf / sample.pdf;
 
 		if (i > 3) {
-			float roulette_prob = fmaxf(throughput.x, fmaxf(throughput.y, throughput.z));
+			float roulette_prob = fmaxf(throughput.r, fmaxf(throughput.g, throughput.b));
 
 			if (Rand(rng_state) > roulette_prob)
 				break;
@@ -324,130 +323,105 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 			throughput /= roulette_prob;
 		}
 
-		ray.origin = hit.hit_point;
+		ray.origin = hit.point;
 		ray.direction = global_basis * sample.l;
+		bsdf_pdf = sample.pdf;
 
 		Assert(fabsf(Length(ray.direction) - 1) < .0001f);
-		bsdf_pdf = sample.pdf;
 	}
 
 	return color;
 }
 
-int AddMaterial(World *world, Vec3 albedo, Vec3 emission, float roughness, float ior, float metallic, bool transparent)
+i32 AddMaterial(World *world, Vec3 color, float roughness, float ior, float metallic)
 {
 	if (world->material_count >= MAX_MATERIALS)
 		Panic("Too much materials");
 
 	world->materials[world->material_count] = {
-		albedo,
-		emission,
+		color,
 		roughness,
 		ior,
-		metallic,
-		transparent
+		metallic
 	};
 
 	return world->material_count++;
 }
 
-int AddDielectricMaterial(World *world, Vec3 albedo, Vec3 emission, float roughness)
+void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, i32 material_idx, Vec3 light)
 {
-	return AddMaterial(world, albedo, emission, roughness, 1.5f, 0, false);
-}
-
-int AddMetallicMaterial(World *world, Vec3 albedo, Vec3 emission, float roughness)
-{
-	return AddMaterial(world, albedo, emission, roughness, 0, 1, false);
-}
-
-int AddTransparentMaterial(World *world, Vec3 albedo, Vec3 emission, float ior)
-{
-	return AddMaterial(world, albedo, emission, 0, ior, false, true);
-}
-
-void AddSphere(World *world, Vec3 pos, float radius, int material_idx)
-{
-	if (world->sphere_count >= MAX_OBJECTS)
-		Panic("Too much spheres");
-
-	world->spheres[world->sphere_count++] = {
-		material_idx,
-		pos,
-		radius
-	};
-}
-
-void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, int material_idx)
-{
-	if (world->triangle_count >= MAX_OBJECTS)
-		Panic("Too much planes");
+	if (world->object_count >= MAX_OBJECTS)
+		Panic("Too much objects");
 
 	Vec3 e0 = v1 - v0;
 	Vec3 e1 = v2 - v0;
 	Vec3 normal = Normalize(Cross(e0, e1));
 
 	Triangle tri = {
-		material_idx,
 		v0, v1, v2,
 		normal, normal, normal
 	};
 
-	world->triangles[world->triangle_count++] = tri;
+	Object obj = {ObjectType::TRIANGLE, material_idx, -1, tri};
 
-	Vec3 emission = world->materials[material_idx].emission;
+	i32 obj_idx = world->object_count++;
 
-	if (emission.x > 0 || emission.y > 0 || emission.z > 0)
-		world->emissive_triangles[world->emissive_triangle_count++] = tri;
+	if (light.r > 0 || light.g > 0 || light.b > 0) {
+		i32 light_idx = world->light_count++;
+		Light *l = &world->lights[light_idx];
+		l->color = light;
+		l->object_idx = obj_idx;
+		obj.light_idx = light_idx;
+	}
 
+	world->objects[obj_idx] = obj;
 }
 
 void LoadCornellBox(World *world)
 {
 	world->sun_color = {};
 
-	world->sphere_count = 0;
-	world->triangle_count = 0;
-	world->emissive_triangle_count = 0;
+	world->object_count = 0;
+	world->light_count = 0;
 	world->material_count = 0;
 
-	int khaki = AddMaterial(world, {0.725f, 0.71f, 0.68f}, {0, 0, 0}, 1, 1.5f, 0, false);
-	int red = AddMaterial(world, {0.63f, 0.065f, 0.05f}, {0, 0, 0}, 1, 1.5f, 0, false);
-	int green = AddMaterial(world, {0.14f, 0.45f, 0.091f}, {0, 0, 0}, 1, 1.5f, 0, false);
-	int light = AddMaterial(world, {0, 0, 0}, {17, 12, 4}, 1, 1.5f, 0, false);
+	i32 khaki = AddMaterial(world, {0.725f, 0.71f, 0.68f}, 1, 1.5f, 0);
+	i32 red = AddMaterial(world, {0.63f, 0.065f, 0.05f}, 1, 1.5f, 0);
+	i32 green = AddMaterial(world, {0.14f, 0.45f, 0.091f}, 1, 1.5f, 0);
+	i32 light = AddMaterial(world, {0, 0, 0}, 1, 1.5f, 0);
 
-	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, 0.99f, -0}, {-0.99f, 1.01f, 0}, khaki);
-	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, -1, -0}, {1.04f, 0.99f, -0}, khaki);
-	AddTriangle(world, {1.04f, 1.02f, 1.99f}, {-0.99f, -1, 1.99f}, {-0.99f, 1.02f, 1.99f}, khaki);
-	AddTriangle(world, {1.04f, 1.02f, 1.99f}, {1.04f, -1, 1.99f}, {-0.99f, -1, 1.99f}, khaki);
-	AddTriangle(world, {1.04f, 0.99f, -0}, {1.04f, -1, 1.99f}, {1.04f, 1.02f, 1.99f}, khaki);
-	AddTriangle(world, {1.04f, 0.99f, -0}, {1.04f, -1, -0}, {1.04f, -1, 1.99f}, khaki);
-	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, -1, 1.99f}, {1.04f, -1, -0}, green);
-	AddTriangle(world, {-0.99f, -1, 0}, {-0.99f, -1, 1.99f}, {1.04f, -1, 1.99f}, green);
-	AddTriangle(world, {-0.99f, 1.01f, 0}, {1.04f, 1.02f, 1.99f}, {-0.99f, 1.02f, 1.99f}, red);
-	AddTriangle(world, {-0.99f, 1.01f, 0}, {1.04f, 0.99f, -0}, {1.04f, 1.02f, 1.99f}, red);
-	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {0, -0.13f, 0.6f}, {-0.57f, 0.05f, 0.6f}, khaki);
-	AddTriangle(world, {-0.57f, 0.05f, 0.6f}, {-0, -0.13f, 0}, {-0.57f, 0.05f, 0}, khaki);
-	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.57f, 0.05f, 0}, {-0.75f, -0.53f, 0}, khaki);
-	AddTriangle(world, {-0.17f, -0.7f, 0.6f}, {-0.75f, -0.53f, 0}, {-0.17f, -0.7f, 0}, khaki);
-	AddTriangle(world, {0, -0.13f, 0.6f}, {-0.17f, -0.7f, 0}, {-0, -0.13f, 0}, khaki);
-	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.17f, -0.7f, 0.6f}, {0, -0.13f, 0.6f}, khaki);
-	AddTriangle(world, {-0.57f, 0.05f, 0.6f}, {0, -0.13f, 0.6f}, {-0, -0.13f, 0}, khaki);
-	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.57f, 0.05f, 0.6f}, {-0.57f, 0.05f, 0}, khaki);
-	AddTriangle(world, {-0.17f, -0.7f, 0.6f}, {-0.75f, -0.53f, 0.6f}, {-0.75f, -0.53f, 0}, khaki);
-	AddTriangle(world, {0, -0.13f, 0.6f}, {-0.17f, -0.7f, 0.6f}, {-0.17f, -0.7f, 0}, khaki);
-	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {0.49f, 0.71f, 1.2f}, {-0.09f, 0.53f, 1.2f}, khaki);
-	AddTriangle(world, {-0.09f, 0.53f, 1.2f}, {0.49f, 0.71f, -0}, {-0.09f, 0.53f, 0}, khaki);
-	AddTriangle(world, {0.49f, 0.71f, 1.2f}, {0.67f, 0.14f, -0}, {0.49f, 0.71f, -0}, khaki);
-	AddTriangle(world, {0.67f, 0.14f, 1.2f}, {0.09f, -0.04f, -0}, {0.67f, 0.14f, -0}, khaki);
-	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {-0.09f, 0.53f, 0}, {0.09f, -0.04f, -0}, khaki);
-	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {0.67f, 0.14f, 1.2f}, {0.49f, 0.71f, 1.2f}, khaki);
-	AddTriangle(world, {-0.09f, 0.53f, 1.2f}, {0.49f, 0.71f, 1.2f}, {0.49f, 0.71f, -0}, khaki);
-	AddTriangle(world, {0.49f, 0.71f, 1.2f}, {0.67f, 0.14f, 1.2f}, {0.67f, 0.14f, -0}, khaki);
-	AddTriangle(world, {0.67f, 0.14f, 1.2f}, {0.09f, -0.04f, 1.2f}, {0.09f, -0.04f, -0}, khaki);
-	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {-0.09f, 0.53f, 1.2f}, {-0.09f, 0.53f, 0}, khaki);
-	AddTriangle(world, {0.22f, 0.24f, 1.98f}, {-0.16f, -0.23f, 1.98f}, {-0.16f, 0.24f, 1.98f}, light);
-	AddTriangle(world, {0.22f, 0.24f, 1.98f}, {0.22f, -0.23f, 1.98f}, {-0.16f, -0.23f, 1.98f}, light);
+	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, 0.99f, -0}, {-0.99f, 1.01f, 0}, khaki, {});
+	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, -1, -0}, {1.04f, 0.99f, -0}, khaki, {});
+	AddTriangle(world, {1.04f, 1.02f, 1.99f}, {-0.99f, -1, 1.99f}, {-0.99f, 1.02f, 1.99f}, khaki, {});
+	AddTriangle(world, {1.04f, 1.02f, 1.99f}, {1.04f, -1, 1.99f}, {-0.99f, -1, 1.99f}, khaki, {});
+	AddTriangle(world, {1.04f, 0.99f, -0}, {1.04f, -1, 1.99f}, {1.04f, 1.02f, 1.99f}, khaki, {});
+	AddTriangle(world, {1.04f, 0.99f, -0}, {1.04f, -1, -0}, {1.04f, -1, 1.99f}, khaki, {});
+	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, -1, 1.99f}, {1.04f, -1, -0}, green, {});
+	AddTriangle(world, {-0.99f, -1, 0}, {-0.99f, -1, 1.99f}, {1.04f, -1, 1.99f}, green, {});
+	AddTriangle(world, {-0.99f, 1.01f, 0}, {1.04f, 1.02f, 1.99f}, {-0.99f, 1.02f, 1.99f}, red, {});
+	AddTriangle(world, {-0.99f, 1.01f, 0}, {1.04f, 0.99f, -0}, {1.04f, 1.02f, 1.99f}, red, {});
+	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {0, -0.13f, 0.6f}, {-0.57f, 0.05f, 0.6f}, khaki, {});
+	AddTriangle(world, {-0.57f, 0.05f, 0.6f}, {-0, -0.13f, 0}, {-0.57f, 0.05f, 0}, khaki, {});
+	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.57f, 0.05f, 0}, {-0.75f, -0.53f, 0}, khaki, {});
+	AddTriangle(world, {-0.17f, -0.7f, 0.6f}, {-0.75f, -0.53f, 0}, {-0.17f, -0.7f, 0}, khaki, {});
+	AddTriangle(world, {0, -0.13f, 0.6f}, {-0.17f, -0.7f, 0}, {-0, -0.13f, 0}, khaki, {});
+	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.17f, -0.7f, 0.6f}, {0, -0.13f, 0.6f}, khaki, {});
+	AddTriangle(world, {-0.57f, 0.05f, 0.6f}, {0, -0.13f, 0.6f}, {-0, -0.13f, 0}, khaki, {});
+	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.57f, 0.05f, 0.6f}, {-0.57f, 0.05f, 0}, khaki, {});
+	AddTriangle(world, {-0.17f, -0.7f, 0.6f}, {-0.75f, -0.53f, 0.6f}, {-0.75f, -0.53f, 0}, khaki, {});
+	AddTriangle(world, {0, -0.13f, 0.6f}, {-0.17f, -0.7f, 0.6f}, {-0.17f, -0.7f, 0}, khaki, {});
+	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {0.49f, 0.71f, 1.2f}, {-0.09f, 0.53f, 1.2f}, khaki, {});
+	AddTriangle(world, {-0.09f, 0.53f, 1.2f}, {0.49f, 0.71f, -0}, {-0.09f, 0.53f, 0}, khaki, {});
+	AddTriangle(world, {0.49f, 0.71f, 1.2f}, {0.67f, 0.14f, -0}, {0.49f, 0.71f, -0}, khaki, {});
+	AddTriangle(world, {0.67f, 0.14f, 1.2f}, {0.09f, -0.04f, -0}, {0.67f, 0.14f, -0}, khaki, {});
+	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {-0.09f, 0.53f, 0}, {0.09f, -0.04f, -0}, khaki, {});
+	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {0.67f, 0.14f, 1.2f}, {0.49f, 0.71f, 1.2f}, khaki, {});
+	AddTriangle(world, {-0.09f, 0.53f, 1.2f}, {0.49f, 0.71f, 1.2f}, {0.49f, 0.71f, -0}, khaki, {});
+	AddTriangle(world, {0.49f, 0.71f, 1.2f}, {0.67f, 0.14f, 1.2f}, {0.67f, 0.14f, -0}, khaki, {});
+	AddTriangle(world, {0.67f, 0.14f, 1.2f}, {0.09f, -0.04f, 1.2f}, {0.09f, -0.04f, -0}, khaki, {});
+	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {-0.09f, 0.53f, 1.2f}, {-0.09f, 0.53f, 0}, khaki, {});
+	AddTriangle(world, {0.22f, 0.24f, 1.98f}, {-0.16f, -0.23f, 1.98f}, {-0.16f, 0.24f, 1.98f}, light, {17, 12, 4});
+	AddTriangle(world, {0.22f, 0.24f, 1.98f}, {0.22f, -0.23f, 1.98f}, {-0.16f, -0.23f, 1.98f}, light, {17, 12, 4});
 }
 
 int main()
@@ -520,17 +494,17 @@ int main()
 			}
 
 			color /= (float)n_samples;
-			if (color.x < 0 || color.y < 0 || color.z < 0)
+			if (color.r < 0 || color.g < 0 || color.b < 0)
 				color = {0, 0, 1};
-			if (isnan(color.x) || isnan(color.y) || isnan(color.z))
+			if (isnan(color.r) || isnan(color.g) || isnan(color.b))
 				color = {0, 1, 0};
 			Vec3 mapped = LinearToGamma(color, exposure);
 
 			int pixel_pos = (v * width + u) * 3;
 
-			byte ir = (byte)(255 * Clamp(mapped.x, 0, 1));
-			byte ig = (byte)(255 * Clamp(mapped.y, 0, 1));
-			byte ib = (byte)(255 * Clamp(mapped.z, 0, 1));
+			byte ir = (byte)(255 * Clamp(mapped.r, 0, 1));
+			byte ig = (byte)(255 * Clamp(mapped.g, 0, 1));
+			byte ib = (byte)(255 * Clamp(mapped.b, 0, 1));
 
 			image_data[pixel_pos + 2] = ir;
 			image_data[pixel_pos + 1] = ig;

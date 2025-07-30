@@ -9,7 +9,9 @@ struct Vec2 {
 };
 
 struct Vec3 {
-	float x, y, z;
+	union {float x; float r;};
+	union {float y; float g;};
+	union {float z; float b;};
 };
 
 static inline float Clamp(float x, float mn, float mx)
@@ -24,6 +26,11 @@ static inline Vec3 Clamp(Vec3 x, float mn, float mx)
 		Clamp(x.y, mn, mx),
 		Clamp(x.z, mn, mx)
 	};
+}
+
+static inline Vec3 V3(float s)
+{
+	return {s, s, s};
 }
 
 static inline Vec3 operator+(Vec3 a, Vec3 b)

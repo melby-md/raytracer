@@ -3,7 +3,7 @@
 #include <stdint.h> // *int*_t
 #include <stdio.h>
 
-#define Countof(x) (sizeof(x)/sizeof((x)[0]))
+#define CountOf(x) (sizeof(x)/sizeof((x)[0]))
 
 #define Panic(...) \
 	do { \
@@ -20,16 +20,16 @@
 #define Log(...) fprintf(stderr, __VA_ARGS__)
 
 #ifdef RELEASE
-#  define Break()
+#  define Assert(c)
 #elif __GNUC__
-#  define Break() __builtin_trap()
+#  define Assert(c) if (!(c)) __builtin_trap()
 #elif _MSC_VER
-#  define Break() __debugbreak()
+#  define Assert(c) if (!(c)) __debugbreak()
 #else
-#  define Break() (*(volatile int *)0 = 0)
+#  undef NDEBUG
+#  include <assert.h>
+#  define Assert(c) assert(c)
 #endif
-
-#define Assert(c) if (!(c)) Break()
 
 typedef uintptr_t uptr;
 typedef ptrdiff_t isize;
