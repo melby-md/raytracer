@@ -1,39 +1,17 @@
+#include <errno.h>
+#include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <stddef.h>
 
 #include "common.hpp"
 #include "mathlib.hpp"
 #include "bmp.hpp"
 #include "bsdf.hpp"
-
-enum class ObjectType {
-	TRIANGLE,
-	SPHERE
-};
-
-struct Light {
-	Vec3 color;
-	i32 object_idx;
-};
-
-struct Triangle {
-	Vec3 v0, v1, v2;
-	Vec3 n0, n1, n2;
-};
-
-struct Sphere {
-	Vec3 center;
-	float radius;
-};
-
-struct Object {
-	ObjectType type;
-	i32 material_idx;
-	i32 light_idx;
-	union {
-		Triangle triangle;
-		Sphere sphere;
-	};
-};
+#include "scene.hpp"
+#include "parser.hpp"
 
 struct Hit {
 	Vec3 point;
@@ -43,23 +21,6 @@ struct Hit {
 
 struct Ray {
 	Vec3 origin, direction;
-};
-
-constexpr i32 MAX_OBJECTS = 64;
-constexpr i32 MAX_MATERIALS = 64;
-constexpr i32 MAX_LIGHTS = 64;
-
-struct World {
-	int object_count;
-	Object objects[MAX_OBJECTS];
-
-	int light_count;
-	Light lights[MAX_LIGHTS];
-
-	int material_count;
-	Material materials[MAX_MATERIALS];
-
-	Vec3 sun_color;
 };
 
 Vec2 RandomDisk(u32 *rng_state) {
@@ -150,18 +111,18 @@ float HitSphere(Sphere *sphere, Ray ray)
 	return distance;
 }
 
-bool NearestHit(World *world, Ray ray, Hit *hit)
+bool NearestHit(Scene *scene, Ray ray, Hit *hit)
 {
 	float min_distance = INFINITY;
 	Vec3 normal, point;
 	i32 obj_idx = -1;
 
-	for (i32 i = 0; i < world->object_count; i++) {
-		Object *obj = &world->objects[i];
+	for (i32 i = 0; i < scene->object_count; i++) {
+		Object *obj = &scene->objects[i];
 
 		float t;
 		switch (obj->type) {
-		case ObjectType::SPHERE:
+		case OBJ_SPHERE:
 			t = HitSphere(&obj->sphere, ray);
 			if (t < min_distance) {
 				point = ray.origin + ray.direction * t;
@@ -172,7 +133,7 @@ bool NearestHit(World *world, Ray ray, Hit *hit)
 			}
 			break;
 
-		case ObjectType::TRIANGLE:
+		case OBJ_TRIANGLE:
 			float u, v;
 			t = HitTriangle(&obj->triangle, ray, &u, &v);
 			if (t < min_distance) {
@@ -194,20 +155,20 @@ bool NearestHit(World *world, Ray ray, Hit *hit)
 	return obj_idx >= 0;
 }
 
-bool Occluded(World *world, Ray ray, float distance)
+bool Occluded(Scene *scene, Ray ray, float distance)
 {
-	for (i32 i = 0; i < world->object_count; i++) {
-		Object *obj = &world->objects[i];
+	for (i32 i = 0; i < scene->object_count; i++) {
+		Object *obj = &scene->objects[i];
 
 		float t;
 		switch (obj->type) {
-		case ObjectType::SPHERE:
+		case OBJ_SPHERE:
 			t = HitSphere(&obj->sphere, ray);
 			if (t < distance)
 				return true;
 			break;
 
-		case ObjectType::TRIANGLE:
+		case OBJ_TRIANGLE:
 			float u, v;
 			t = HitTriangle(&obj->triangle, ray, &u, &v);
 			if (t < distance)
@@ -234,9 +195,9 @@ float TrianglePDF(Triangle *triangle, Vec3 point, Vec3 triangle_point, Vec3 tria
 	return length2 / Dot(triangle_normal, direction) / area;
 }
 
-Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
+Vec3 RayTrace(Scene *scene, Ray ray, u32 *rng_state)
 {
-	bool sample_lights = world->light_count > 0;
+	bool sample_lights = scene->light_count > 0;
 
 	int max_bounces = 10;
 
@@ -246,10 +207,10 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 
 	for (int i = 0; i < max_bounces; i++) {
 		Hit hit;
-		bool did_hit = NearestHit(world, ray, &hit);
+		bool did_hit = NearestHit(scene, ray, &hit);
 
 		if (!did_hit) {
-			color += throughput * world->sun_color;
+			color += throughput * scene->sun_color;
 			break;
 		}
 
@@ -259,9 +220,9 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 			facing_forward = false;
 		}
 
-		Object *obj = &world->objects[hit.obj_idx];
-		Material mat = world->materials[obj->material_idx];
-		Light *light = obj->light_idx >= 0 ? &world->lights[obj->light_idx] : nullptr;
+		Object *obj = &scene->objects[hit.obj_idx];
+		Material mat = scene->materials[obj->material_idx];
+		Light *light = obj->light_idx >= 0 ? &scene->lights[obj->light_idx] : nullptr;
 
 		Mat3 global_basis = OrthoNormalBasis(hit.normal);
 		Mat3 local_basis = Transpose(global_basis);
@@ -272,7 +233,7 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 			if (i == 0 || !sample_lights) {
 				color += throughput * light->color;
 			} else {
-				float pmf = 1.f / (float)world->light_count;
+				float pmf = 1.f / (float)scene->light_count;
 				float light_pdf = pmf * TrianglePDF(&obj->triangle, ray.origin, hit.point, hit.normal); 
 				float mis_weight = PowerHeuristic(bsdf_pdf, light_pdf);
 
@@ -283,9 +244,9 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 		}
 
 		if (sample_lights) {
-			u32 rand_idx = Rand(rng_state, 0, world->light_count-1);
-			Light *sampled_light = &world->lights[rand_idx];
-			Triangle *tri = &world->objects[sampled_light->object_idx].triangle;
+			u32 rand_idx = Rand(rng_state, 0, scene->light_count-1);
+			Light *sampled_light = &scene->lights[rand_idx];
+			Triangle *tri = &scene->objects[sampled_light->object_idx].triangle;
 
 			Vec3 uvw = RandomTriangle(rng_state);
 			Vec3 light_point = uvw.x * tri->v0 + uvw.y * tri->v1 + uvw.z * tri->v2;
@@ -298,8 +259,8 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 			Vec3 l = local_basis * light_direction;
 
 			if (Dot(light_direction, light_normal) < 0 &&
-			   !Occluded(world, shadow_ray, light_distance - .0001f)) {
-				float pmf = 1.f / (float)world->light_count;
+			   !Occluded(scene, shadow_ray, light_distance - .0001f)) {
+				float pmf = 1.f / (float)scene->light_count;
 				float light_pdf = pmf * TrianglePDF(tri, hit.point, light_point, light_normal); 
 				float b_pdf = BSDFPDF(v, l, mat);
 				float mis_weight = PowerHeuristic(light_pdf, b_pdf);
@@ -333,102 +294,9 @@ Vec3 RayTrace(World *world, Ray ray, u32 *rng_state)
 	return color;
 }
 
-i32 AddMaterial(World *world, Vec3 color, float roughness, float ior, float metallic)
-{
-	if (world->material_count >= MAX_MATERIALS)
-		Panic("Too much materials");
-
-	world->materials[world->material_count] = {
-		color,
-		roughness,
-		ior,
-		metallic
-	};
-
-	return world->material_count++;
-}
-
-void AddTriangle(World *world, Vec3 v0, Vec3 v1, Vec3 v2, i32 material_idx, Vec3 light)
-{
-	if (world->object_count >= MAX_OBJECTS)
-		Panic("Too much objects");
-
-	Vec3 e0 = v1 - v0;
-	Vec3 e1 = v2 - v0;
-	Vec3 normal = Normalize(Cross(e0, e1));
-
-	Triangle tri = {
-		v0, v1, v2,
-		normal, normal, normal
-	};
-
-	Object obj = {ObjectType::TRIANGLE, material_idx, -1, tri};
-
-	i32 obj_idx = world->object_count++;
-
-	if (light.r > 0 || light.g > 0 || light.b > 0) {
-		i32 light_idx = world->light_count++;
-		Light *l = &world->lights[light_idx];
-		l->color = light;
-		l->object_idx = obj_idx;
-		obj.light_idx = light_idx;
-	}
-
-	world->objects[obj_idx] = obj;
-}
-
-void LoadCornellBox(World *world)
-{
-	world->sun_color = {};
-
-	world->object_count = 0;
-	world->light_count = 0;
-	world->material_count = 0;
-
-	i32 khaki = AddMaterial(world, {0.725f, 0.71f, 0.68f}, 1, 1.5f, 0);
-	i32 red = AddMaterial(world, {0.63f, 0.065f, 0.05f}, 1, 1.5f, 0);
-	i32 green = AddMaterial(world, {0.14f, 0.45f, 0.091f}, 1, 1.5f, 0);
-	i32 light = AddMaterial(world, {0, 0, 0}, 1, 1.5f, 0);
-
-	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, 0.99f, -0}, {-0.99f, 1.01f, 0}, khaki, {});
-	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, -1, -0}, {1.04f, 0.99f, -0}, khaki, {});
-	AddTriangle(world, {1.04f, 1.02f, 1.99f}, {-0.99f, -1, 1.99f}, {-0.99f, 1.02f, 1.99f}, khaki, {});
-	AddTriangle(world, {1.04f, 1.02f, 1.99f}, {1.04f, -1, 1.99f}, {-0.99f, -1, 1.99f}, khaki, {});
-	AddTriangle(world, {1.04f, 0.99f, -0}, {1.04f, -1, 1.99f}, {1.04f, 1.02f, 1.99f}, khaki, {});
-	AddTriangle(world, {1.04f, 0.99f, -0}, {1.04f, -1, -0}, {1.04f, -1, 1.99f}, khaki, {});
-	AddTriangle(world, {-0.99f, -1, 0}, {1.04f, -1, 1.99f}, {1.04f, -1, -0}, green, {});
-	AddTriangle(world, {-0.99f, -1, 0}, {-0.99f, -1, 1.99f}, {1.04f, -1, 1.99f}, green, {});
-	AddTriangle(world, {-0.99f, 1.01f, 0}, {1.04f, 1.02f, 1.99f}, {-0.99f, 1.02f, 1.99f}, red, {});
-	AddTriangle(world, {-0.99f, 1.01f, 0}, {1.04f, 0.99f, -0}, {1.04f, 1.02f, 1.99f}, red, {});
-	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {0, -0.13f, 0.6f}, {-0.57f, 0.05f, 0.6f}, khaki, {});
-	AddTriangle(world, {-0.57f, 0.05f, 0.6f}, {-0, -0.13f, 0}, {-0.57f, 0.05f, 0}, khaki, {});
-	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.57f, 0.05f, 0}, {-0.75f, -0.53f, 0}, khaki, {});
-	AddTriangle(world, {-0.17f, -0.7f, 0.6f}, {-0.75f, -0.53f, 0}, {-0.17f, -0.7f, 0}, khaki, {});
-	AddTriangle(world, {0, -0.13f, 0.6f}, {-0.17f, -0.7f, 0}, {-0, -0.13f, 0}, khaki, {});
-	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.17f, -0.7f, 0.6f}, {0, -0.13f, 0.6f}, khaki, {});
-	AddTriangle(world, {-0.57f, 0.05f, 0.6f}, {0, -0.13f, 0.6f}, {-0, -0.13f, 0}, khaki, {});
-	AddTriangle(world, {-0.75f, -0.53f, 0.6f}, {-0.57f, 0.05f, 0.6f}, {-0.57f, 0.05f, 0}, khaki, {});
-	AddTriangle(world, {-0.17f, -0.7f, 0.6f}, {-0.75f, -0.53f, 0.6f}, {-0.75f, -0.53f, 0}, khaki, {});
-	AddTriangle(world, {0, -0.13f, 0.6f}, {-0.17f, -0.7f, 0.6f}, {-0.17f, -0.7f, 0}, khaki, {});
-	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {0.49f, 0.71f, 1.2f}, {-0.09f, 0.53f, 1.2f}, khaki, {});
-	AddTriangle(world, {-0.09f, 0.53f, 1.2f}, {0.49f, 0.71f, -0}, {-0.09f, 0.53f, 0}, khaki, {});
-	AddTriangle(world, {0.49f, 0.71f, 1.2f}, {0.67f, 0.14f, -0}, {0.49f, 0.71f, -0}, khaki, {});
-	AddTriangle(world, {0.67f, 0.14f, 1.2f}, {0.09f, -0.04f, -0}, {0.67f, 0.14f, -0}, khaki, {});
-	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {-0.09f, 0.53f, 0}, {0.09f, -0.04f, -0}, khaki, {});
-	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {0.67f, 0.14f, 1.2f}, {0.49f, 0.71f, 1.2f}, khaki, {});
-	AddTriangle(world, {-0.09f, 0.53f, 1.2f}, {0.49f, 0.71f, 1.2f}, {0.49f, 0.71f, -0}, khaki, {});
-	AddTriangle(world, {0.49f, 0.71f, 1.2f}, {0.67f, 0.14f, 1.2f}, {0.67f, 0.14f, -0}, khaki, {});
-	AddTriangle(world, {0.67f, 0.14f, 1.2f}, {0.09f, -0.04f, 1.2f}, {0.09f, -0.04f, -0}, khaki, {});
-	AddTriangle(world, {0.09f, -0.04f, 1.2f}, {-0.09f, 0.53f, 1.2f}, {-0.09f, 0.53f, 0}, khaki, {});
-	AddTriangle(world, {0.22f, 0.24f, 1.98f}, {-0.16f, -0.23f, 1.98f}, {-0.16f, 0.24f, 1.98f}, light, {17, 12, 4});
-	AddTriangle(world, {0.22f, 0.24f, 1.98f}, {0.22f, -0.23f, 1.98f}, {-0.16f, -0.23f, 1.98f}, light, {17, 12, 4});
-}
-
 int main()
 {
-	static World world;
-
-	LoadCornellBox(&world);
+	static Scene scene;
 
 	int width = 400, height = 400;
 	int n_samples = 20;
@@ -438,8 +306,8 @@ int main()
 	Vec3 looking_at = {0, 0, 1};
 	Vec3 vup = {0, 0, 1};
 	float defocus_angle = -2;
-	float focus_dist = Length(looking_at - camera_position);
 
+	float focus_dist = Length(looking_at - camera_position);
 	float fov_radians = fov * PI / 180;
 	float aspect_ratio = (float)width/(float)height;
 	float viewport_height = 2 * tan(fov_radians/2) * focus_dist;
@@ -465,10 +333,14 @@ int main()
 	Vec3 defocus_disk_u = right * defocus_radius;
 	Vec3 defocus_disk_v = up * defocus_radius;
 
-	byte *image_data = (byte *)malloc(sizeof(u8) * width * height * 3);
+	byte *image_data = (byte *)malloc(width * height * 3);
 
 	double percent_row = 100 / (double)height;
 	double percent_done = 0;
+
+	LoadScene(&scene, "scene.txt");
+
+	scene.sun_color = V3(0);
 
 	Log("Raytracing... 0%%\r");
 
@@ -490,7 +362,7 @@ int main()
 				Vec3 ray_direction = Normalize(pixel_center - ray_origin);
 				Ray ray = {ray_origin, ray_direction};
 
-				color += RayTrace(&world, ray, &rng_state);
+				color += RayTrace(&scene, ray, &rng_state);
 			}
 
 			color /= (float)n_samples;
@@ -517,7 +389,7 @@ int main()
 			Log("Raytracing... %.0f%%\r", percent_done);
 		}
 	}
-	putchar('\n');
+	Log("\n");
 
 	WriteBMP("image.bmp", width, height, image_data);
 

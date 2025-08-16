@@ -1,5 +1,4 @@
 // Why must we suffer Bjarne?
-#include <math.h>
 
 constexpr float PI = 3.14159265f;
 constexpr float INV_PI = 0.31830988f;
@@ -9,9 +8,9 @@ struct Vec2 {
 };
 
 struct Vec3 {
-	union {float x; float r;};
-	union {float y; float g;};
-	union {float z; float b;};
+	union {float x, r;};
+	union {float y, g;};
+	union {float z, b;};
 };
 
 static inline float Clamp(float x, float mn, float mx)
@@ -219,8 +218,8 @@ static inline Mat3 OrthoNormalBasis(Vec3 z_axis)
 static inline Mat3 Transpose(Mat3 m)
 {
 	return Mat3{
-		{m.i.x, m.j.x, m.k.x},
-		{m.i.y, m.j.y, m.k.y},
-		{m.i.z, m.j.z, m.k.z}
+		m.i.x, m.j.x, m.k.x,
+		m.i.y, m.j.y, m.k.y,
+		m.i.z, m.j.z, m.k.z
 	};
 }

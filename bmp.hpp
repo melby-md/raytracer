@@ -1,5 +1,3 @@
-#include <stdio.h>
-
 void WriteBMP(const char *file_name, int w, int h, byte *data)
 {
 	int filesize = 54 + 3*w*h;

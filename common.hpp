@@ -1,8 +1,4 @@
 // Odds and ends...
-#include <stddef.h> // ptrdiff_t
-#include <stdint.h> // *int*_t
-#include <stdio.h>
-
 #define CountOf(x) (sizeof(x)/sizeof((x)[0]))
 
 #define Panic(...) \
@@ -14,7 +10,7 @@
 #define xstr(x) str(x)
 #define str(x) #x
 
-#define _log(level, ...) fprintf(stderr, level ":" __FILE__ ":" xstr(__LINE__) ": " __VA_ARGS__)
+#define _log(level, ...) Log(level ":" __FILE__ ":" xstr(__LINE__) ": " __VA_ARGS__)
 #define Error(...) _log("ERROR", __VA_ARGS__)
 #define Trace(...) _log("TRACE", __VA_ARGS__)
 #define Log(...) fprintf(stderr, __VA_ARGS__)
@@ -46,6 +42,13 @@ typedef int16_t   i16;
 typedef int8_t    i8;
 
 typedef unsigned char byte;
+
+struct String {
+	char *data;
+	isize length;
+};
+
+#define S(s) (String{(char *)(s), sizeof(s)-1})
 
 u32 _rand(u32 *rng_state)
 {
