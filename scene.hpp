@@ -33,6 +33,15 @@ constexpr i32 MAX_MATERIALS = 64;
 constexpr i32 MAX_LIGHTS = 64;
 
 struct Scene {
+	Vec3 camera;
+	Vec3 up;
+	Vec3 look_at;
+	float fov;
+	float defocus_angle;
+	float exposure;
+	i16 width, height;
+	i16 samples;
+
 	int object_count;
 	Object objects[MAX_OBJECTS];
 

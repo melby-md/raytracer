@@ -1,5 +1,13 @@
 # cornell box
 
+render {
+	camera [-1.9 0 1]
+	look_at [0 0 1]
+	samples 25
+	width 400
+	height 400
+}
+
 material {
 	color [0.725 0.71 0.68]
 	ior 1.5

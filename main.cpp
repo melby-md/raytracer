@@ -298,81 +298,72 @@ int main()
 {
 	static Scene scene;
 
-	int width = 400, height = 400;
-	int n_samples = 20;
-	float exposure = 1;
-	float fov = 90;
-	Vec3 camera_position = {-1.9f, 0, 1};
-	Vec3 looking_at = {0, 0, 1};
-	Vec3 vup = {0, 0, 1};
-	float defocus_angle = -2;
+	LoadScene(&scene, "scene.txt");
 
-	float focus_dist = Length(looking_at - camera_position);
-	float fov_radians = fov * PI / 180;
-	float aspect_ratio = (float)width/(float)height;
+	float focus_dist = Length(scene.look_at - scene.camera);
+	float fov_radians = scene.fov * PI / 180;
+	float aspect_ratio = (float)scene.width/(float)scene.height;
 	float viewport_height = 2 * tan(fov_radians/2) * focus_dist;
 	float viewport_width = viewport_height * aspect_ratio;
 
-	Vec3 forward = Normalize(looking_at - camera_position);
-	Vec3 right = Normalize(Cross(forward, vup));
+	Vec3 forward = Normalize(scene.look_at - scene.camera);
+	Vec3 right = Normalize(Cross(forward, scene.up));
 	Vec3 up = Cross(right, forward);
 
 	Vec3 viewport_u = right * viewport_width;
 	Vec3 viewport_v = -up * viewport_height;
 
-	Vec3 upper_left = camera_position +
+	Vec3 upper_left = scene.camera +
 		forward * focus_dist
 		- viewport_u/2
 		- viewport_v/2;
 
-	Vec3 du = viewport_u / (float)width;
-	Vec3 dv = viewport_v / (float)height;
+	Vec3 du = viewport_u / scene.width;
+	Vec3 dv = viewport_v / scene.height;
 
-	float defocus_angle_radians = defocus_angle * PI / 180;
+	float defocus_angle_radians = scene.defocus_angle * PI / 180;
 	float defocus_radius = focus_dist * tan(defocus_angle_radians / 2);
 	Vec3 defocus_disk_u = right * defocus_radius;
 	Vec3 defocus_disk_v = up * defocus_radius;
 
-	byte *image_data = (byte *)malloc(width * height * 3);
+	byte *image_data = (byte *)malloc(scene.width * scene.height * 3);
 
-	double percent_row = 100 / (double)height;
+	double percent_row = 100. / scene.height;
 	double percent_done = 0;
-
-	LoadScene(&scene, "scene.txt");
 
 	scene.sun_color = V3(0);
 
 	Log("Raytracing... 0%%\r");
 
 	#pragma omp parallel for
-	for (int v = 0; v < height; v++) {
+	for (i16 v = 0; v < scene.height; v++) {
 		u32 rng_state = 69420 + v;
 
-		for (int u = 0; u < width; u++) {
+		for (i16 u = 0; u < scene.width; u++) {
 			Vec3 color = {};
-			for (int i = 0; i < n_samples; i++) {
+			for (i16 i = 0; i < scene.samples; i++) {
 				float random_u = Rand(&rng_state);
 				float random_v = Rand(&rng_state);
 				
 				Vec2 rand_disk = RandomDisk(&rng_state);
-				Vec3 rand_defocus = camera_position + (rand_disk.x * defocus_disk_u) + (rand_disk.y * defocus_disk_v);
+				Vec3 rand_defocus = scene.camera + (rand_disk.x * defocus_disk_u) + (rand_disk.y * defocus_disk_v);
 
-				Vec3 ray_origin = (defocus_angle <= 0) ? camera_position : rand_defocus;
-				Vec3 pixel_center = upper_left + du * ((float)u + random_u) + dv * ((float)v + random_v);
+				Vec3 ray_origin = (scene.defocus_angle <= 0) ? scene.camera : rand_defocus;
+				Vec3 pixel_center = upper_left + du * (u + random_u) + dv * (v + random_v);
 				Vec3 ray_direction = Normalize(pixel_center - ray_origin);
 				Ray ray = {ray_origin, ray_direction};
 
 				color += RayTrace(&scene, ray, &rng_state);
 			}
 
-			color /= (float)n_samples;
+			color /= scene.samples;
 			if (color.r < 0 || color.g < 0 || color.b < 0)
 				color = {0, 0, 1};
 			if (isnan(color.r) || isnan(color.g) || isnan(color.b))
 				color = {0, 1, 0};
-			Vec3 mapped = LinearToGamma(color, exposure);
+			Vec3 mapped = LinearToGamma(color, scene.exposure);
 
-			int pixel_pos = (v * width + u) * 3;
+			int pixel_pos = (v * scene.width + u) * 3;
 
 			byte ir = (byte)(255 * Clamp(mapped.r, 0, 1));
 			byte ig = (byte)(255 * Clamp(mapped.g, 0, 1));
@@ -391,7 +382,7 @@ int main()
 	}
 	Log("\n");
 
-	WriteBMP("image.bmp", width, height, image_data);
+	WriteBMP("image.bmp", scene.width, scene.height, image_data);
 
 	return 0;
 }
