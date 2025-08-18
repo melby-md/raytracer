@@ -335,7 +335,7 @@ int main()
 
 	Log("Raytracing... 0%%\r");
 
-	#pragma omp parallel for
+	#pragma omp parallel for schedule(dynamic, 1)
 	for (i16 v = 0; v < scene.height; v++) {
 		u32 rng_state = 69420 + v;
 
