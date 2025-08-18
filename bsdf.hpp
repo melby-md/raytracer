@@ -32,7 +32,7 @@ float CosineWeightedPDF(Vec3 l)
 }
 
 /*
- * https://jcgt.org/published/0007/04/01/
+ * https://doi.org/10.1111/cgf.14867
  */
 Vec3 GGXVNDFSample(Vec3 v, float roughness, u32 *rng_state)
 {
@@ -42,21 +42,18 @@ Vec3 GGXVNDFSample(Vec3 v, float roughness, u32 *rng_state)
 	float alpha = roughness * roughness;
 
 	Vec3 vh = Normalize(Vec3{alpha * v.x, alpha * v.y, v.z});
-	float lensq = vh.x * vh.x + vh.y * vh.y;
-	Vec3 t1 = lensq > 0 ? Vec3{-vh.y, vh.x, 0} / sqrtf(lensq) : Vec3{1, 0, 0};
-	Vec3 t2 = Cross(vh, t1);
-	float r = sqrtf(r1);
-	float phi = 2 * PI * r2;
 
-	float p1 = r*cosf(phi);
-	float p2 = r*sinf(phi);
-	float s = (1 + vh.z) / 2;
-	p2 = (1 - s) * sqrtf(fmaxf(0, 1 - p1 * p1)) + s * p2;
-
-	Vec3 n = p1*t1 + p2*t2 + sqrtf(fmaxf(0, 1 - p1*p1 - p2*p2))*vh;
-	n = Normalize(Vec3{alpha*n.x, alpha*n.y, fmaxf(0, n.z)});
+	float phi = 2 * PI * r1;
+	float z = fmaf((1 - r2), (1 + vh.z), -vh.z);
+	float sin_theta = sqrtf(Clamp(1 - z * z, 0, 1));
+	float x = sin_theta * cosf(phi);
+	float y = sin_theta * sinf(phi);
+	Vec3 cap = {x, y, z};
+	Vec3 h = cap + vh;
+	Vec3 n = Normalize(Vec3{alpha*h.x, alpha*h.y, h.z});
 
 	return 2 * n * Dot(n, v) - v;
+
 }
 
 float GGXVNDFPDF(Vec3 v, Vec3 l, float roughness)
