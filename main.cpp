@@ -24,13 +24,13 @@ struct Ray {
 };
 
 Vec2 RandomDisk(u32 *rng_state) {
-	float theta = 2.f * PI * Rand(rng_state);
-	float r = sqrtf(Rand(rng_state));
+	for (;;) {
+		float x = Rand(rng_state) * 2 - 1;
+		float y = Rand(rng_state) * 2 - 1;
 
-	float x = r * cosf(theta);
-	float y = r * sinf(theta);
-
-	return Vec2{x, y};
+		if (x * y < 1)
+			return Vec2{x, y};
+	}
 }
 
 Vec3 RandomTriangle(u32 *rng_state)
@@ -302,7 +302,7 @@ int main()
 
 	float focus_dist = Length(scene.look_at - scene.camera);
 	float fov_radians = scene.fov * PI / 180;
-	float aspect_ratio = (float)scene.width/(float)scene.height;
+	float aspect_ratio = (float)scene.width/scene.height;
 	float viewport_height = 2 * tan(fov_radians/2) * focus_dist;
 	float viewport_width = viewport_height * aspect_ratio;
 
@@ -342,13 +342,18 @@ int main()
 		for (i16 u = 0; u < scene.width; u++) {
 			Vec3 color = {};
 			for (i16 i = 0; i < scene.samples; i++) {
+				Vec3 ray_origin;
+				if (scene.defocus_angle > 0) {
+
+					Vec2 rand_disk = RandomDisk(&rng_state);
+					ray_origin = scene.camera + (rand_disk.x * defocus_disk_u) + (rand_disk.y * defocus_disk_v);
+
+				} else {
+					ray_origin = scene.camera;
+				}
+
 				float random_u = Rand(&rng_state);
 				float random_v = Rand(&rng_state);
-				
-				Vec2 rand_disk = RandomDisk(&rng_state);
-				Vec3 rand_defocus = scene.camera + (rand_disk.x * defocus_disk_u) + (rand_disk.y * defocus_disk_v);
-
-				Vec3 ray_origin = (scene.defocus_angle <= 0) ? scene.camera : rand_defocus;
 				Vec3 pixel_center = upper_left + du * (u + random_u) + dv * (v + random_v);
 				Vec3 ray_direction = Normalize(pixel_center - ray_origin);
 				Ray ray = {ray_origin, ray_direction};
