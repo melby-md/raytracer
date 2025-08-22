@@ -352,9 +352,18 @@ int main()
 					ray_origin = scene.camera;
 				}
 
-				float random_u = Rand(&rng_state);
-				float random_v = Rand(&rng_state);
-				Vec3 pixel_center = upper_left + du * (u + random_u) + dv * (v + random_v);
+				float u1;
+				do {
+					u1 = Rand(&rng_state);
+				} while (u1 == 0);
+				float u2 = Rand(&rng_state);
+
+				float sigma = .5f;
+
+				float jitter_u = sigma * sqrtf(-2 * logf(u1)) * cosf(2 * PI * u2);
+				float jitter_v = sigma * sqrtf(-2 * logf(u1)) * sinf(2 * PI * u2);
+
+				Vec3 pixel_center = upper_left + du * (u + .5f + jitter_u) + dv * (v + .5f + jitter_v);
 				Vec3 ray_direction = Normalize(pixel_center - ray_origin);
 				Ray ray = {ray_origin, ray_direction};
 
