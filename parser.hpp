@@ -341,7 +341,8 @@ void LoadScene(Scene *scene, const char *file)
 				if (StringEquals(key, S("color"))) {
 					mat->color = ReadVec3(lexer);
 				} else if (StringEquals(key, S("roughness"))) {
-					mat->roughness = ReadNumber(lexer);
+					float roughness = ReadNumber(lexer);
+					mat->roughness = roughness*roughness;
 				} else if (StringEquals(key, S("ior"))) {
 					mat->ior = ReadNumber(lexer);
 				} else if (StringEquals(key, S("metallic"))) {

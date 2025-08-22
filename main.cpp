@@ -262,16 +262,16 @@ Vec3 RayTrace(Scene *scene, Ray ray, u32 *rng_state)
 			   !Occluded(scene, shadow_ray, light_distance - .0001f)) {
 				float pmf = 1.f / (float)scene->light_count;
 				float light_pdf = pmf * TrianglePDF(tri, hit.point, light_point, light_normal); 
-				float b_pdf = BSDFPDF(v, l, mat);
+				float b_pdf = BSDFPDF(v, l, &mat);
 				float mis_weight = PowerHeuristic(light_pdf, b_pdf);
 
 				Assert(light_pdf > 0);
 
-				color += throughput * sampled_light->color * BSDF(v, l, mat) * mis_weight / light_pdf;
+				color += throughput * sampled_light->color * BSDF(v, l, &mat) * mis_weight / light_pdf;
 			}
 		}
 
-		Sample sample = SampleBSDF(v, mat, rng_state);
+		Sample sample = SampleBSDF(v, &mat, rng_state);
 
 		throughput *= sample.bsdf / sample.pdf;
 
@@ -287,8 +287,6 @@ Vec3 RayTrace(Scene *scene, Ray ray, u32 *rng_state)
 		ray.origin = hit.point;
 		ray.direction = global_basis * sample.l;
 		bsdf_pdf = sample.pdf;
-
-		Assert(fabsf(Length(ray.direction) - 1) < .0001f);
 	}
 
 	return color;

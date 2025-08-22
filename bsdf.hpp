@@ -34,12 +34,10 @@ float CosineWeightedPDF(Vec3 l)
 /*
  * https://doi.org/10.1111/cgf.14867
  */
-Vec3 GGXVNDFSample(Vec3 v, float roughness, u32 *rng_state)
+Vec3 GGXVNDFSample(Vec3 v, float alpha, u32 *rng_state)
 {
 	float r1 = Rand(rng_state);
 	float r2 = Rand(rng_state);
-
-	float alpha = roughness * roughness;
 
 	Vec3 vh = Normalize(Vec3{alpha * v.x, alpha * v.y, v.z});
 
@@ -56,14 +54,10 @@ Vec3 GGXVNDFSample(Vec3 v, float roughness, u32 *rng_state)
 
 }
 
-float GGXVNDFPDF(Vec3 v, Vec3 l, float roughness)
+float GGXVNDFPDF(Vec3 v, Vec3 l, float alpha)
 {
 	Vec3 h = Normalize(v + l);
 
-	if (Dot(h, v) <= 0)
-		return 0;
-
-	float alpha = roughness * roughness;
 	float alpha2 = alpha * alpha;
 
 	float ndf = alpha2 / (PI * powf(h.z * h.z * (alpha2 - 1) + 1, 2));
@@ -82,7 +76,7 @@ Vec3 Fresnel(float cosine, Vec3 f0)
  * https://jcgt.org/published/0003/02/03/
  * https://google.github.io/filament/Filament.md.html#materialsystem
  */
-Vec3 BSDF(Vec3 v, Vec3 l, Material mat)
+Vec3 BSDF(Vec3 v, Vec3 l, Material *mat)
 {
 	Assert(v.z > 0);
 
@@ -91,8 +85,7 @@ Vec3 BSDF(Vec3 v, Vec3 l, Material mat)
 
 	Vec3 h = Normalize(v + l);
 
-	float alpha = mat.roughness * mat.roughness;
-	float alpha2 = alpha * alpha;
+	float alpha2 = mat->roughness * mat->roughness;
 
 	// GGX normal distribution function
 	float ndf = alpha2 / (PI * powf(powf(h.z, 2) * (alpha2 - 1) + 1, 2));
@@ -104,23 +97,23 @@ Vec3 BSDF(Vec3 v, Vec3 l, Material mat)
 	float vis = .5f / (vis_v + vis_l);
 
 	// Fresnel term
-	Vec3 dielectric_f0 = V3(powf((1 - mat.ior) / (1 + mat.ior), 2));
+	Vec3 dielectric_f0 = V3(powf((1 - mat->ior) / (1 + mat->ior), 2));
 
-	Vec3 f0 = Lerp(dielectric_f0, mat.color, mat.metallic);
+	Vec3 f0 = Lerp(dielectric_f0, mat->color, mat->metallic);
 
 	Vec3 fresnel = Fresnel(Dot(h, v), f0);
 
-	Vec3 diffuse = (1 - fresnel) * mat.color / PI * (1 - mat.metallic);
+	Vec3 diffuse = (1 - fresnel) * mat->color / PI * (1 - mat->metallic);
 
 	Vec3 specular = fresnel * (vis * ndf);
 
 	return (diffuse + specular) * l.z;
 }
 
-void GetWeights(Material mat, float *_cosine_weight, float *_vndf_weight)
+void GetWeights(Material *mat, float *_cosine_weight, float *_vndf_weight)
 {
-	float cosine_weight = 1 - mat.metallic;
-	float vndf_weight = 1 - cosine_weight * mat.roughness;
+	float cosine_weight = 1 - mat->metallic;
+	float vndf_weight = 1;
 
 	float sum_weights = vndf_weight + cosine_weight;
 
@@ -131,7 +124,7 @@ void GetWeights(Material mat, float *_cosine_weight, float *_vndf_weight)
 	*_vndf_weight = vndf_weight;
 }
 
-float BSDFPDF(Vec3 v, Vec3 l, Material mat)
+float BSDFPDF(Vec3 v, Vec3 l, Material *mat)
 {
 	float cosine_weight;
 	float vndf_weight;
@@ -139,12 +132,12 @@ float BSDFPDF(Vec3 v, Vec3 l, Material mat)
 	GetWeights(mat, &cosine_weight, &vndf_weight);
 
 	float cosine_pdf = CosineWeightedPDF(l);
-	float vndf_pdf = GGXVNDFPDF(v, l, mat.roughness);
+	float vndf_pdf = GGXVNDFPDF(v, l, mat->roughness);
 
 	return cosine_pdf * cosine_weight + vndf_pdf * vndf_weight;
 }
 
-Sample SampleBSDF(Vec3 v, Material mat, u32 *rng_state)
+Sample SampleBSDF(Vec3 v, Material *mat, u32 *rng_state)
 {
 	Sample samp = {};
 	float cosine_weight;
@@ -156,7 +149,7 @@ Sample SampleBSDF(Vec3 v, Material mat, u32 *rng_state)
 	if (Rand(rng_state) < cosine_weight) {
 		l = CosineWeightedSample(rng_state);
 	} else {
-		l = GGXVNDFSample(v, mat.roughness, rng_state);
+		l = GGXVNDFSample(v, mat->roughness, rng_state);
 	}
 
 	float pdf = BSDFPDF(v, l, mat);
