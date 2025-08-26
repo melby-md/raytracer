@@ -51,11 +51,16 @@ Vec3 RandomTriangle(u32 *rng_state)
 	return {u, v, 1 - u - v};
 }
 
-Vec3 LinearToGamma(Vec3 color, float exposure)
+float LinearToGamma(float color, float exposure)
 {
-	Vec3 mapped = 1. - Exp((-color) * exposure);
+	float m = 1 - expf(-color * exposure);
 
-	return Pow(mapped, V3(1 / 2.2f));
+	m = Clamp(m, 0, 1);
+
+	if (m <= .0031308f)
+		return m * 12.92f;
+	else
+		return 1.055f * powf(m, 1 / 2.4f) - .055f;
 }
 
 float HitTriangle(Triangle *tri, Ray ray, float *_u, float *_v)
@@ -373,13 +378,12 @@ int main()
 				color = {0, 0, 1};
 			if (isnan(color.r) || isnan(color.g) || isnan(color.b))
 				color = {0, 1, 0};
-			Vec3 mapped = LinearToGamma(color, scene.exposure);
 
 			int pixel_pos = (v * scene.width + u) * 3;
 
-			byte ir = (byte)(255 * Clamp(mapped.r, 0, 1));
-			byte ig = (byte)(255 * Clamp(mapped.g, 0, 1));
-			byte ib = (byte)(255 * Clamp(mapped.b, 0, 1));
+			byte ir = (byte)(255 * LinearToGamma(color.r, scene.exposure));
+			byte ig = (byte)(255 * LinearToGamma(color.g, scene.exposure));
+			byte ib = (byte)(255 * LinearToGamma(color.b, scene.exposure));
 
 			image_data[pixel_pos + 2] = ir;
 			image_data[pixel_pos + 1] = ig;
