@@ -283,7 +283,7 @@ Vec3 RayTrace(Scene *scene, Ray ray, u32 *rng_state)
 		if (i > 3) {
 			float roulette_prob = fmaxf(throughput.r, fmaxf(throughput.g, throughput.b));
 
-			if (Rand(rng_state) > roulette_prob)
+			if (Rand(rng_state) < (1 - roulette_prob))
 				break;
 
 			throughput /= roulette_prob;
