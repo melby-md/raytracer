@@ -9,9 +9,9 @@ Then run:
 
     ./build.sh
 
-To change the c++ compiler, set the `CXX` enviroment variable:
+To change the compiler, set the `CXX` enviroment variable:
 
-    CXX=clang ./build.sh
+    CXX=clang++ ./build.sh
 
 ## Running
 
