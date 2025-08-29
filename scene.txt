@@ -3,7 +3,7 @@
 render {
 	camera [-1.9 0 1]
 	look_at [0 0 1]
-	samples 25
+	samples 50
 	width 400
 	height 400
 }

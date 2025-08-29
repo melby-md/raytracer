@@ -7,7 +7,7 @@ struct Vec2 {
 	float x, y;
 };
 
-struct Vec3 {
+struct alignas(16) Vec3 {
 	union {float x, r;};
 	union {float y, g;};
 	union {float z, b;};
@@ -218,8 +218,8 @@ static inline Mat3 OrthoNormalBasis(Vec3 z_axis)
 static inline Mat3 Transpose(Mat3 m)
 {
 	return Mat3{
-		m.i.x, m.j.x, m.k.x,
-		m.i.y, m.j.y, m.k.y,
-		m.i.z, m.j.z, m.k.z
+		{m.i.x, m.j.x, m.k.x},
+		{m.i.y, m.j.y, m.k.y},
+		{m.i.z, m.j.z, m.k.z}
 	};
 }
