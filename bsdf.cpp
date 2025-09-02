@@ -1,16 +1,3 @@
-struct Material {
-	Vec3 color;
-	float roughness;
-	float ior;
-	float metallic;
-};
-
-struct Sample {
-	Vec3 bsdf;
-	float pdf;
-	Vec3 l;
-};
-
 Vec3 CosineWeightedSample(u32 *rng_state)
 {
 	float r1 = Rand(rng_state);

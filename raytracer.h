@@ -1,7 +1,56 @@
-// Why must we suffer Bjarne?
+#define CountOf(x) (sizeof(x)/sizeof((x)[0]))
+
+#define Panic(...) \
+	do { \
+		Error(__VA_ARGS__); \
+		exit(1); \
+	} while (0)
+
+#define xstr(x) str(x)
+#define str(x) #x
+
+#define _log(level, ...) Log(level ":" __FILE__ ":" xstr(__LINE__) ": " __VA_ARGS__)
+#define Error(...) _log("ERROR", __VA_ARGS__)
+#define Trace(...) _log("TRACE", __VA_ARGS__)
+#define Log(...) fprintf(stderr, __VA_ARGS__)
+
+#ifdef RELEASE
+#  define Assert(c)
+#elif __GNUC__
+#  define Assert(c) if (!(c)) __builtin_trap()
+#elif _MSC_VER
+#  define Assert(c) if (!(c)) __debugbreak()
+#else
+#  undef NDEBUG
+#  include <assert.h>
+#  define Assert(c) assert(c)
+#endif
+
+typedef uintptr_t uptr;
+typedef ptrdiff_t isize;
+typedef size_t    usize;
+
+typedef uint64_t  u64;
+typedef uint32_t  u32;
+typedef uint16_t  u16;
+typedef uint8_t   u8;
+
+typedef int64_t   i64;
+typedef int32_t   i32;
+typedef int16_t   i16;
+typedef int8_t    i8;
+
+typedef unsigned char byte;
 
 constexpr float PI = 3.14159265f;
 constexpr float INV_PI = 0.31830988f;
+
+struct String {
+	char *data;
+	isize length;
+};
+
+#define S(s) (String{(char *)(s), sizeof(s)-1})
 
 struct Vec2 {
 	float x, y;
@@ -13,6 +62,103 @@ struct Vec3 {
 	union {float z, b;};
 };
 
+// 3x3 column major
+struct Mat3 {
+	Vec3 i, j, k;
+};
+
+enum ObjectType {
+	OBJ_TRIANGLE,
+	OBJ_SPHERE
+};
+
+struct Light {
+	Vec3 color;
+	i32 object_idx;
+};
+
+struct Triangle {
+	Vec3 v0, v1, v2;
+	Vec3 n0, n1, n2;
+};
+
+struct Sphere {
+	Vec3 center;
+	float radius;
+};
+
+struct Object {
+	ObjectType type;
+	i32 material_idx;
+	i32 light_idx;
+	union {
+		Triangle triangle;
+		Sphere sphere;
+	};
+};
+
+struct Material {
+	Vec3 color;
+	float roughness;
+	float ior;
+	float metallic;
+};
+
+struct Sample {
+	Vec3 bsdf;
+	float pdf;
+	Vec3 l;
+};
+
+struct Ray {
+	Vec3 origin, direction;
+};
+
+struct Hit {
+	Vec3 point;
+	Vec3 normal;
+	i32 obj_idx;
+};
+
+constexpr i32 MAX_OBJECTS = 64;
+constexpr i32 MAX_MATERIALS = 64;
+constexpr i32 MAX_LIGHTS = 64;
+
+struct Scene {
+	Vec3 camera;
+	Vec3 up;
+	Vec3 look_at;
+	float fov;
+	float defocus_angle;
+	float exposure;
+	i16 width, height;
+	i16 samples;
+
+	int object_count;
+	Object objects[MAX_OBJECTS];
+
+	int light_count;
+	Light lights[MAX_LIGHTS];
+
+	int material_count;
+	Material materials[MAX_MATERIALS];
+
+	Vec3 sun_color;
+};
+
+// bsdf.cpp
+Vec3   BSDF(Vec3, Vec3, Material *);
+float  BSDFPDF(Vec3, Vec3, Material *);
+Sample SampleBSDF(Vec3, Material *, u32 *);
+
+// main.cpp
+float Rand(u32 *);
+u32   Rand(u32 *, u32, u32);
+
+// parser.cpp
+void LoadScene(Scene *, const char *);
+
+// Math
 static inline float Clamp(float x, float mn, float mx)
 {
 	return fminf(mx, fmaxf(mn, x));
@@ -195,11 +341,6 @@ static inline Vec3 Reflect(Vec3 v, Vec3 n)
 {
 	return v - 2 * Dot(v, n) * n;
 }
-
-// 3x3 column major
-struct Mat3 {
-	Vec3 i, j, k;
-};
 
 static inline Vec3 operator*(Mat3 m, Vec3 v)
 {

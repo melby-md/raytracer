@@ -6,22 +6,66 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "common.hpp"
-#include "mathlib.hpp"
-#include "bmp.hpp"
-#include "bsdf.hpp"
-#include "scene.hpp"
-#include "parser.hpp"
+#include "raytracer.h"
+#include "bsdf.cpp"
+#include "parser.cpp"
 
-struct Hit {
-	Vec3 point;
-	Vec3 normal;
-	i32 obj_idx;
-};
+void WriteBMP(const char *file_name, int w, int h, byte *data)
+{
+	int filesize = 54 + 3*w*h;
 
-struct Ray {
-	Vec3 origin, direction;
-};
+	byte bmpfileheader[14] = {'B','M', 0,0,0,0, 0,0, 0,0, 54,0,0,0};
+	byte bmpinfoheader[40] = {40,0,0,0, 0,0,0,0, 0,0,0,0, 1,0, 24,0};
+	byte bmppad[3] = {0,0,0};
+
+	bmpfileheader[ 2] = (byte)(filesize    );
+	bmpfileheader[ 3] = (byte)(filesize>> 8);
+	bmpfileheader[ 4] = (byte)(filesize>>16);
+	bmpfileheader[ 5] = (byte)(filesize>>24);
+
+	bmpinfoheader[ 4] = (byte)(       w    );
+	bmpinfoheader[ 5] = (byte)(       w>> 8);
+	bmpinfoheader[ 6] = (byte)(       w>>16);
+	bmpinfoheader[ 7] = (byte)(       w>>24);
+	bmpinfoheader[ 8] = (byte)(       h    );
+	bmpinfoheader[ 9] = (byte)(       h>> 8);
+	bmpinfoheader[10] = (byte)(       h>>16);
+	bmpinfoheader[11] = (byte)(       h>>24);
+
+	FILE *f = fopen(file_name, "wb");
+
+	fwrite(bmpfileheader,1,14,f);
+	fwrite(bmpinfoheader,1,40,f);
+	for(int i=0; i<h; i++)
+	{
+		fwrite(data+(w*(h-i-1)*3),3,w,f);
+		fwrite(bmppad,1,(4-(w*3)%4)%4,f);
+	}
+
+	fclose(f);
+}
+
+u32 _rand(u32 *rng_state)
+{
+	// Xorshift32
+	u32 x = *rng_state;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	*rng_state = x;
+
+	return x;
+}
+
+float Rand(u32 *rng_state)
+{
+	return (float)(_rand(rng_state) >> 8) / (1<<24);
+}
+
+u32 Rand(u32 *rng_state, u32 min, u32 max)
+{
+	return _rand(rng_state) % (max - min + 1) + min;
+}
 
 Vec2 RandomDisk(u32 *rng_state) {
 	for (;;) {
