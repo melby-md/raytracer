@@ -144,8 +144,10 @@ float ReadNumber(Lexer *lexer)
 {
 	String s = ReadString(lexer);
 	float n;
-	if (StringToNumber(s, &n) < 0)
+	if (StringToNumber(s, &n) < 0) {
+		Log("%ld\n", lexer->pos);
 		Panic("Invalid number\n");
+	}
 	return n;
 }
 
@@ -208,7 +210,7 @@ void NewAreaLight(Scene *scene, i32 obj_idx, Vec3 color)
 	i32 light_idx = scene->light_count++;
 	Light *light = &scene->lights[light_idx];
 	light->color = color;
-	light->object_idx = obj_idx;
+	//light->object_idx = obj_idx;
 
 	Object *obj = &scene->objects[obj_idx];
 	obj->light_idx = light_idx;
@@ -225,6 +227,7 @@ void LoadScene(Scene *scene, const char *file)
 	scene->width = 512;
 	scene->height = 512;
 	scene->samples = 20;
+	scene->sky_box_color = {};
 
 	scene->object_count = 0;
 	scene->material_count = 1;
@@ -380,6 +383,8 @@ void LoadScene(Scene *scene, const char *file)
 					scene->height = ReadI16(lexer);
 				} else if (StringEquals(key, S("samples"))) {
 					scene->samples = ReadI16(lexer);
+				} else if (StringEquals(key, S("sky_box_color"))) {
+					scene->sky_box_color = ReadVec3(lexer);
 				} else {
 					Panic("Unknown key '%.*s'\n", (int)key.length, key.data);
 				}

@@ -2,5 +2,6 @@
 *.swp
 *.swo
 raytracer
+a.out
 *.exe
 *.bmp

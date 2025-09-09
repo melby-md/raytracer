@@ -14,7 +14,7 @@
 #define Trace(...) _log("TRACE", __VA_ARGS__)
 #define Log(...) fprintf(stderr, __VA_ARGS__)
 
-#ifdef RELEASE
+#ifdef OPT
 #  define Assert(c)
 #elif __GNUC__
 #  define Assert(c) if (!(c)) __builtin_trap()
@@ -42,9 +42,6 @@ typedef int8_t    i8;
 
 typedef unsigned char byte;
 
-constexpr float PI = 3.14159265f;
-constexpr float INV_PI = 0.31830988f;
-
 struct String {
 	char *data;
 	isize length;
@@ -60,6 +57,12 @@ struct Vec3 {
 	union {float x, r;};
 	union {float y, g;};
 	union {float z, b;};
+
+	float operator[](isize pos)
+	{
+		Assert(pos >= 0 && pos < 3);
+		return ((float *)this)[pos];
+	}
 };
 
 // 3x3 column major
@@ -97,6 +100,14 @@ struct Object {
 	};
 };
 
+struct BVHNode;
+
+struct BVHTree {
+	BVHNode *nodes;
+	i32 max_nodes;
+	Object *objects;
+};
+
 struct Material {
 	Vec3 color;
 	float roughness;
@@ -110,17 +121,7 @@ struct Sample {
 	Vec3 l;
 };
 
-struct Ray {
-	Vec3 origin, direction;
-};
-
-struct Hit {
-	Vec3 point;
-	Vec3 normal;
-	i32 obj_idx;
-};
-
-constexpr i32 MAX_OBJECTS = 64;
+constexpr i32 MAX_OBJECTS = 16384;
 constexpr i32 MAX_MATERIALS = 64;
 constexpr i32 MAX_LIGHTS = 64;
 
@@ -134,17 +135,21 @@ struct Scene {
 	i16 width, height;
 	i16 samples;
 
-	int object_count;
+	i32 object_count;
 	Object objects[MAX_OBJECTS];
 
-	int light_count;
+	i32 light_count;
 	Light lights[MAX_LIGHTS];
 
-	int material_count;
+	i32 material_count;
 	Material materials[MAX_MATERIALS];
 
-	Vec3 sun_color;
+	Vec3 sky_box_color;
+
+	BVHTree bvh;
 };
+
+constexpr float PI = 3.14159265f;
 
 // bsdf.cpp
 Vec3   BSDF(Vec3, Vec3, Material *);
@@ -153,12 +158,29 @@ Sample SampleBSDF(Vec3, Material *, u32 *);
 
 // main.cpp
 float Rand(u32 *);
-u32   Rand(u32 *, u32, u32);
 
 // parser.cpp
 void LoadScene(Scene *, const char *);
 
 // Math
+static inline Vec3 Min(Vec3 a, Vec3 b)
+{
+	return {
+		fminf(a.x, b.x),
+		fminf(a.y, b.y),
+		fminf(a.z, b.z)
+	};
+}
+
+static inline Vec3 Max(Vec3 a, Vec3 b)
+{
+	return {
+		fmaxf(a.x, b.x),
+		fmaxf(a.y, b.y),
+		fmaxf(a.z, b.z)
+	};
+}
+
 static inline float Clamp(float x, float mn, float mx)
 {
 	return fminf(mx, fmaxf(mn, x));
@@ -180,12 +202,12 @@ static inline Vec3 V3(float s)
 
 static inline Vec3 operator+(Vec3 a, Vec3 b)
 {
-	return Vec3{a.x + b.x, a.y + b.y, a.z + b.z};
+	return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
 static inline Vec3 operator+(Vec3 v, float s)
 {
-	return v + Vec3{s, s, s};
+	return {v.x + s, v.y + s, v.z + s};
 }
 
 static inline Vec3 operator+(float s, Vec3 v)
@@ -195,32 +217,32 @@ static inline Vec3 operator+(float s, Vec3 v)
 
 static inline Vec3 operator-(Vec3 a, Vec3 b)
 {
-	return Vec3{a.x - b.x, a.y - b.y, a.z - b.z};
+	return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
 static inline Vec3 operator-(Vec3 v)
 {
-	return Vec3{-v.x, -v.y, -v.z};
+	return {-v.x, -v.y, -v.z};
 }
 
 static inline Vec3 operator-(Vec3 v, float s)
 {
-	return v - Vec3{s, s, s};
+	return {v.x - s, v.y - s, v.z - s};
 }
 
 static inline Vec3 operator-(float s, Vec3 v)
 {
-	return Vec3{s, s, s} - v;
+	return {s - v.x, s - v.y, s - v.z};
 }
 
 static inline Vec3 operator*(Vec3 a, Vec3 b)
 {
-	return Vec3{a.x*b.x, a.y*b.y, a.z*b.z};
+	return {a.x*b.x, a.y*b.y, a.z*b.z};
 }
 
 static inline Vec3 operator*(Vec3 v, float s)
 {
-	return Vec3{v.x*s, v.y*s, v.z*s};
+	return {v.x*s, v.y*s, v.z*s};
 }
 
 static inline Vec3 operator*(float s, Vec3 v)
@@ -230,17 +252,17 @@ static inline Vec3 operator*(float s, Vec3 v)
 
 static inline Vec3 operator/(Vec3 a, Vec3 b)
 {
-	return Vec3{a.x/b.x, a.y/b.y, a.z/b.z};
+	return {a.x/b.x, a.y/b.y, a.z/b.z};
 }
 
 static inline Vec3 operator/(Vec3 v, float s)
 {
-	return Vec3{v.x/s, v.y/s, v.z/s};
+	return {v.x/s, v.y/s, v.z/s};
 }
 
 static inline Vec3 operator/(float s, Vec3 v)
 {
-	return v/s;
+	return {s/v.x, s/v.y, s/v.z};
 }
 
 static inline Vec3 &operator+=(Vec3 &a, Vec3 b)
@@ -353,12 +375,12 @@ static inline Mat3 OrthoNormalBasis(Vec3 z_axis)
 	Vec3 y_axis = Normalize(Cross(z_axis, a));
 	Vec3 x_axis = Cross(z_axis, y_axis);
 
-	return Mat3{x_axis, y_axis, z_axis};
+	return {x_axis, y_axis, z_axis};
 }
 
 static inline Mat3 Transpose(Mat3 m)
 {
-	return Mat3{
+	return {
 		m.i.x, m.j.x, m.k.x,
 		m.i.y, m.j.y, m.k.y,
 		m.i.z, m.j.z, m.k.z

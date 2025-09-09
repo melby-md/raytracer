@@ -10,6 +10,34 @@
 #include "bsdf.cpp"
 #include "parser.cpp"
 
+struct BVHNode {
+	Vec3 aabb_min, aabb_max;
+	i32 index, object_count;
+};
+
+struct Ray {
+	Vec3 origin, direction;
+};
+
+struct Hit {
+	Vec3 point;
+	Vec3 normal;
+	i32 obj_idx;
+};
+
+
+float LinearToGamma(float color, float exposure)
+{
+	float m = 1 - expf(-color * exposure);
+
+	m = Clamp(m, 0, 1);
+
+	if (m <= .0031308f)
+		return m * 12.92f;
+	else
+		return 1.055f * powf(m, 1 / 2.4f) - .055f;
+}
+
 void WriteBMP(const char *file_name, int w, int h, byte *data)
 {
 	int filesize = 54 + 3*w*h;
@@ -73,7 +101,7 @@ Vec2 RandomDisk(u32 *rng_state) {
 		float y = Rand(rng_state) * 2 - 1;
 
 		if (x * y < 1)
-			return Vec2{x, y};
+			return {x, y};
 	}
 }
 
@@ -95,35 +123,140 @@ Vec3 RandomTriangle(u32 *rng_state)
 	return {u, v, 1 - u - v};
 }
 
-float LinearToGamma(float color, float exposure)
+void UpdateBounds(BVHTree *tree, i32 index)
 {
-	float m = 1 - expf(-color * exposure);
+	BVHNode *node = &tree->nodes[index];
+	Assert(node->object_count > 0);
 
-	m = Clamp(m, 0, 1);
+	node->aabb_min = V3(INFINITY);
+	node->aabb_max = V3(-INFINITY);
 
-	if (m <= .0031308f)
-		return m * 12.92f;
-	else
-		return 1.055f * powf(m, 1 / 2.4f) - .055f;
+	i32 last = node->index + node->object_count;
+
+	for (i32 i = node->index; i < last; i++) {
+		Vec3 aabb_min = V3(INFINITY);
+		Vec3 aabb_max = V3(-INFINITY);
+
+		Object *obj = &tree->objects[i];
+
+		switch (obj->type) {
+		case OBJ_SPHERE:
+			aabb_min = obj->sphere.center - V3(obj->sphere.radius);
+			aabb_max = obj->sphere.center + V3(obj->sphere.radius);
+			break;
+
+		case OBJ_TRIANGLE:
+			aabb_min = obj->triangle.v0;
+			aabb_min = Min(aabb_min, obj->triangle.v1);
+			aabb_min = Min(aabb_min, obj->triangle.v2);
+
+			aabb_max = obj->triangle.v0;
+			aabb_max = Max(aabb_max, obj->triangle.v1);
+			aabb_max = Max(aabb_max, obj->triangle.v2);
+		}
+
+		node->aabb_min = Min(node->aabb_min, aabb_min);
+		node->aabb_max = Max(node->aabb_max, aabb_max);
+	}
 }
 
-float HitTriangle(Triangle *tri, Ray ray, float *_u, float *_v)
+void BuildBVH(BVHTree *tree, i32 object_count)
+{
+	i32 node_count = 1;
+	BVHNode *node = tree->nodes;
+	node->index = 0;
+	node->object_count = object_count;
+	UpdateBounds(tree, 0);
+
+	BVHNode *stack[64];
+	int stack_ptr = 0;
+
+	for (;;) {
+		if (stack_ptr >= (int)CountOf(stack)) {
+			node = stack[--stack_ptr];
+			continue;
+		}
+
+		if (node->object_count <= 2) {
+			if (stack_ptr == 0)
+				break;
+			node = stack[--stack_ptr];
+			continue;
+		}
+
+		Vec3 extent = node->aabb_max - node->aabb_min;
+		int axis = 0;
+		if (extent.y > extent.x)
+			axis = 1;
+		if (extent.z > extent[axis])
+			axis = 2;
+		float split_pos = node->aabb_min[axis] + extent[axis] * .5f;
+
+		i32 i = node->index;
+		i32 j = i + node->object_count - 1;
+		while (i <= j) {
+			Object *obj = &tree->objects[i];
+			Vec3 centroid = {};
+			switch (obj->type) {
+			case OBJ_SPHERE:
+				centroid = obj->sphere.center;
+				break;
+			case OBJ_TRIANGLE:
+				centroid = (obj->triangle.v0 + obj->triangle.v1 + obj->triangle.v2) * (1.f / 3.f);
+			}
+
+			if (centroid[axis] < split_pos)
+				i++;
+			else {
+				Object temp = tree->objects[i];
+				tree->objects[i] = tree->objects[j];
+				tree->objects[j] = temp;
+				j--;
+			}
+		}
+
+		i32 left_count = i - node->index;
+		if (left_count == 0 || left_count == node->object_count) {
+			if (stack_ptr == 0)
+				break;
+			node = stack[--stack_ptr];
+			continue;
+		}
+
+		i32 left_child = node_count++;
+		i32 right_child = node_count++;
+		tree->nodes[left_child].index = node->index;
+		tree->nodes[left_child].object_count = left_count;
+		tree->nodes[right_child].index = i;
+		tree->nodes[right_child].object_count = node->object_count - left_count;
+		node->index = left_child;
+		node->object_count = 0;
+
+		UpdateBounds(tree, left_child);
+		UpdateBounds(tree, right_child);
+
+		stack[stack_ptr++] = &tree->nodes[right_child];
+		node = &tree->nodes[left_child];
+	}
+}
+
+float HitTriangle(Triangle *tri, Ray *ray, float *_u, float *_v)
 {
 	Vec3 e0 = tri->v0 - tri->v2;
 	Vec3 e1 = tri->v1 - tri->v2;
-	Vec3 pvec = Cross(ray.direction, e1);
+	Vec3 pvec = Cross(ray->direction, e1);
 	float det = Dot(e0, pvec);
 
 	if (det > -.0001f && det < .0001f)
 		return INFINITY;
 
-	Vec3 tvec = ray.origin - tri->v2;
+	Vec3 tvec = ray->origin - tri->v2;
 	float u = Dot(tvec, pvec) / det;
 	if (u < 0 || u > 1)
 		return INFINITY;
 
 	Vec3 qvec = Cross(tvec, e0);
-	float v = Dot(ray.direction, qvec) / det;
+	float v = Dot(ray->direction, qvec) / det;
 	if (v < 0 || u + v > 1)
 		return INFINITY;
 
@@ -138,10 +271,10 @@ float HitTriangle(Triangle *tri, Ray ray, float *_u, float *_v)
 	return INFINITY;
 }
 
-float HitSphere(Sphere *sphere, Ray ray)
+float HitSphere(Sphere *sphere, Ray *ray)
 {
-	Vec3 oc = sphere->center - ray.origin;
-	float h = Dot(ray.direction, oc);
+	Vec3 oc = sphere->center - ray->origin;
+	float h = Dot(ray->direction, oc);
 	float c = Length2(oc) - sphere->radius*sphere->radius;
 	float delta = h*h - c;
 
@@ -160,39 +293,94 @@ float HitSphere(Sphere *sphere, Ray ray)
 	return distance;
 }
 
-bool NearestHit(Scene *scene, Ray ray, Hit *hit)
+bool IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax)
+{
+	float tx1 = (bmin.x - ray->origin.x) / ray->direction.x;
+	float tx2 = (bmax.x - ray->origin.x) / ray->direction.x;
+
+	float tmin = fminf(tx1, tx2);
+	float tmax = fmaxf(tx1, tx2);
+
+	float ty1 = (bmin.y - ray->origin.y) / ray->direction.y;
+	float ty2 = (bmax.y - ray->origin.y) / ray->direction.y;
+
+	tmin = fmaxf(tmin, fminf(ty1, ty2));
+	tmax = fminf(tmax, fmaxf(ty1, ty2));
+
+	float tz1 = (bmin.z - ray->origin.z) / ray->direction.z;
+	float tz2 = (bmax.z - ray->origin.z) / ray->direction.z;
+
+	tmin = fmaxf(tmin, fminf(tz1, tz2));
+	tmax = fminf(tmax, fmaxf(tz1, tz2));
+
+	return tmax >= tmin && tmax > 0;
+}
+
+bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
 {
 	float min_distance = INFINITY;
 	Vec3 normal, point;
 	i32 obj_idx = -1;
 
-	for (i32 i = 0; i < scene->object_count; i++) {
-		Object *obj = &scene->objects[i];
+	BVHNode *node = tree->nodes;
+	BVHNode *stack[64];
+	int stack_ptr = 0;
 
-		float t;
-		switch (obj->type) {
-		case OBJ_SPHERE:
-			t = HitSphere(&obj->sphere, ray);
-			if (t < min_distance) {
-				point = ray.origin + ray.direction * t;
-				normal = (point - obj->sphere.center) / obj->sphere.radius;
+	for (;;) {
+		if (node->object_count > 0) {
+			i32 last = node->index + node->object_count;
+			for (i32 i = node->index; i < last; i++) {
+				Object *obj = &tree->objects[i];
 
-				obj_idx = i;
-				min_distance = t;
+				float t;
+				switch (obj->type) {
+				case OBJ_SPHERE:
+					t = HitSphere(&obj->sphere, ray);
+					if (t < min_distance) {
+						point = ray->origin + ray->direction * t;
+						normal = (point - obj->sphere.center) / obj->sphere.radius;
+
+						obj_idx = i;
+						min_distance = t;
+					}
+					break;
+
+				case OBJ_TRIANGLE:
+					float u, v;
+					t = HitTriangle(&obj->triangle, ray, &u, &v);
+					if (t < min_distance) {
+						point = ray->origin + ray->direction * t;
+
+						float w = 1 - u - v;
+						normal = Normalize(obj->triangle.n0 * u + obj->triangle.n1 * v + obj->triangle.n2 * w);
+
+						obj_idx = i;
+						min_distance = t;
+					}
+				}
 			}
-			break;
 
-		case OBJ_TRIANGLE:
-			float u, v;
-			t = HitTriangle(&obj->triangle, ray, &u, &v);
-			if (t < min_distance) {
-				point = ray.origin + ray.direction * t;
+			if (stack_ptr == 0)
+				break;
+			node = stack[--stack_ptr];
+		} else {
 
-				float w = 1 - u - v;
-				normal = Normalize(obj->triangle.n0 * u + obj->triangle.n1 * v + obj->triangle.n2 * w);
+			BVHNode *child1 = &tree->nodes[node->index];
+			BVHNode *child2 = &tree->nodes[node->index + 1];
 
-				obj_idx = i;
-				min_distance = t;
+			bool isect1 = IntersectAABB(ray, child1->aabb_min, child1->aabb_max);
+			bool isect2 = IntersectAABB(ray, child2->aabb_min, child2->aabb_max);
+
+			if (isect1) {
+				node = child1;
+				if (isect2)
+					stack[stack_ptr++] = child2;
+			} else if (isect2) {
+				node = child2;
+			} else {
+				if (stack_ptr == 0)
+					break;
+				node = stack[--stack_ptr];
 			}
 		}
 	}
@@ -204,24 +392,56 @@ bool NearestHit(Scene *scene, Ray ray, Hit *hit)
 	return obj_idx >= 0;
 }
 
-bool Occluded(Scene *scene, Ray ray, float distance)
+bool Occluded(BVHTree *tree, Ray *ray, float distance)
 {
-	for (i32 i = 0; i < scene->object_count; i++) {
-		Object *obj = &scene->objects[i];
+	BVHNode *node = tree->nodes;
+	BVHNode *stack[64];
+	int stack_ptr = 0;
 
-		float t;
-		switch (obj->type) {
-		case OBJ_SPHERE:
-			t = HitSphere(&obj->sphere, ray);
-			if (t < distance)
-				return true;
-			break;
+	for (;;) {
+		if (node->object_count > 0) {
+			i32 last = node->index + node->object_count;
+			for (i32 i = node->index; i < last; i++) {
+				Object *obj = &tree->objects[i];
 
-		case OBJ_TRIANGLE:
-			float u, v;
-			t = HitTriangle(&obj->triangle, ray, &u, &v);
-			if (t < distance)
-				return true;
+				float t;
+				switch (obj->type) {
+				case OBJ_SPHERE:
+					t = HitSphere(&obj->sphere, ray);
+					if (t < distance)
+						return true;
+					break;
+
+				case OBJ_TRIANGLE:
+					float u, v;
+					t = HitTriangle(&obj->triangle, ray, &u, &v);
+					if (t < distance)
+						return true;
+				}
+			}
+
+			if (stack_ptr == 0)
+				break;
+			node = stack[--stack_ptr];
+		} else {
+
+			BVHNode *child1 = &tree->nodes[node->index];
+			BVHNode *child2 = &tree->nodes[node->index + 1];
+
+			bool isect1 = IntersectAABB(ray, child1->aabb_min, child1->aabb_max);
+			bool isect2 = IntersectAABB(ray, child2->aabb_min, child2->aabb_max);
+
+			if (isect1) {
+				node = child1;
+				if (isect2)
+					stack[stack_ptr++] = child2;
+			} else if (isect2) {
+				node = child2;
+			} else {
+				if (stack_ptr == 0)
+					break;
+				node = stack[--stack_ptr];
+			}
 		}
 	}
 
@@ -244,8 +464,9 @@ float TrianglePDF(Triangle *triangle, Vec3 point, Vec3 triangle_point, Vec3 tria
 	return length2 / Dot(triangle_normal, direction) / area;
 }
 
-Vec3 RayTrace(Scene *scene, Ray ray, u32 *rng_state)
+Vec3 RayTrace(Scene *scene, Ray *_ray, u32 *rng_state)
 {
+	Ray ray = *_ray;
 	bool sample_lights = scene->light_count > 0;
 
 	int max_bounces = 10;
@@ -256,10 +477,10 @@ Vec3 RayTrace(Scene *scene, Ray ray, u32 *rng_state)
 
 	for (int i = 0; i < max_bounces; i++) {
 		Hit hit;
-		bool did_hit = NearestHit(scene, ray, &hit);
+		bool did_hit = NearestHit(&scene->bvh, &ray, &hit);
 
 		if (!did_hit) {
-			color += throughput * scene->sun_color;
+			color += throughput * scene->sky_box_color;
 			break;
 		}
 
@@ -308,7 +529,7 @@ Vec3 RayTrace(Scene *scene, Ray ray, u32 *rng_state)
 			Vec3 l = local_basis * light_direction;
 
 			if (Dot(light_direction, light_normal) < 0 &&
-			   !Occluded(scene, shadow_ray, light_distance - .0001f)) {
+			   !Occluded(&scene->bvh, &shadow_ray, light_distance - .0001f)) {
 				float pmf = 1.f / (float)scene->light_count;
 				float light_pdf = pmf * TrianglePDF(tri, hit.point, light_point, light_normal); 
 				float b_pdf = BSDFPDF(v, l, &mat);
@@ -341,16 +562,38 @@ Vec3 RayTrace(Scene *scene, Ray ray, u32 *rng_state)
 	return color;
 }
 
-int main()
+int main(int argc, char **argv)
 {
 	static Scene scene;
 
-	LoadScene(&scene, "scene.txt");
+	if (argc < 2) {
+		Log("Usage: %s [FILE]\n", argv[0]);
+		return 1;
+	}
+
+	LoadScene(&scene, argv[1]);
+
+	static BVHNode nodes[16384];
+	BVHTree tree = {
+		nodes,
+		16384,
+		scene.objects
+	};
+
+	BuildBVH(&tree, scene.object_count);
+	scene.bvh = tree;
+
+	for (i32 i = 0; i < scene.object_count; i++) {
+		Object *obj = &scene.objects[i];
+		if (obj->light_idx >= 0) {
+			scene.lights[obj->light_idx].object_idx = i;
+		}
+	}
 
 	float focus_dist = Length(scene.look_at - scene.camera);
 	float fov_radians = scene.fov * PI / 180;
 	float aspect_ratio = (float)scene.width/scene.height;
-	float viewport_height = 2 * tan(fov_radians/2) * focus_dist;
+	float viewport_height = 2 * tanf(fov_radians/2) * focus_dist;
 	float viewport_width = viewport_height * aspect_ratio;
 
 	Vec3 forward = Normalize(scene.look_at - scene.camera);
@@ -369,7 +612,7 @@ int main()
 	Vec3 dv = viewport_v / scene.height;
 
 	float defocus_angle_radians = scene.defocus_angle * PI / 180;
-	float defocus_radius = focus_dist * tan(defocus_angle_radians / 2);
+	float defocus_radius = focus_dist * tanf(defocus_angle_radians / 2);
 	Vec3 defocus_disk_u = right * defocus_radius;
 	Vec3 defocus_disk_v = up * defocus_radius;
 
@@ -377,8 +620,6 @@ int main()
 
 	double percent_row = 100. / scene.height;
 	double percent_done = 0;
-
-	scene.sun_color = V3(0);
 
 	Log("Raytracing... 0%%\r");
 
@@ -414,7 +655,7 @@ int main()
 				Vec3 ray_direction = Normalize(pixel_center - ray_origin);
 				Ray ray = {ray_origin, ray_direction};
 
-				color += RayTrace(&scene, ray, &rng_state);
+				color += RayTrace(&scene, &ray, &rng_state);
 			}
 
 			color /= scene.samples;

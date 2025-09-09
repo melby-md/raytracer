@@ -13,10 +13,14 @@ To change the compiler, set the `CXX` enviroment variable:
 
     CXX=clang++ ./build.sh
 
+To create an optimized build:
+
+    ./build.sh opt
+
 ## Running
 
-Execute on the same folder where the file `scene.txt` is:
+Execute `raytracer` specifying the scene file:
 
-    ./raytracer
+    ./raytracer scenes/cornell_box.txt
 
-To change the render modify `scene.txt`.
+The render will be in the `image.bmp` file. Other examples are available in the `scenes` folder.
