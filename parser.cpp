@@ -15,12 +15,12 @@ struct Lexer {
 	isize pos;
 };
 
-bool IsSpace(char c)
+static bool IsSpace(char c)
 {
 	return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }
 
-bool IsAlpha(char c)
+static bool IsAlpha(char c)
 {
 	switch (c) {
 	case '\0': case '{': case '}': case '[': case ']': case '#':
@@ -30,14 +30,14 @@ bool IsAlpha(char c)
 	}
 }
 
-bool StringEquals(String a, String b)
+static bool StringEquals(String a, String b)
 {
 	if (a.length != b.length)
 		return false;
 	return memcmp(a.data, b.data, a.length) == 0;
 }
 
-Token NextToken(Lexer *lexer)
+static Token NextToken(Lexer *lexer)
 {
 	isize start;
 	TokenType type = TOK_NIL;
@@ -85,7 +85,7 @@ Token NextToken(Lexer *lexer)
 	return {type, {&lexer->input[start], lexer->pos - start}};
 }
 
-bool ReadCmd(Lexer *lexer, String *cmd)
+static bool ReadCmd(Lexer *lexer, String *cmd)
 {
 	Token t = NextToken(lexer);
 
@@ -103,7 +103,7 @@ bool ReadCmd(Lexer *lexer, String *cmd)
 	return false;
 }
 
-bool ReadKey(Lexer *lexer, String *key)
+static bool ReadKey(Lexer *lexer, String *key)
 {
 	Token t = NextToken(lexer);
 
@@ -118,7 +118,7 @@ bool ReadKey(Lexer *lexer, String *key)
 	return false;
 }
 
-String ReadString(Lexer *lexer)
+static String ReadString(Lexer *lexer)
 {
 	Token t = NextToken(lexer);
 
@@ -130,7 +130,7 @@ String ReadString(Lexer *lexer)
 	return {};
 }
 
-int StringToNumber(String s, float *n)
+static int StringToNumber(String s, float *n)
 {
 	char *end = nullptr;
 	errno = 0;
@@ -140,7 +140,7 @@ int StringToNumber(String s, float *n)
 	return 0;
 }
 
-float ReadNumber(Lexer *lexer)
+static float ReadNumber(Lexer *lexer)
 {
 	String s = ReadString(lexer);
 	float n;
@@ -151,7 +151,7 @@ float ReadNumber(Lexer *lexer)
 	return n;
 }
 
-i16 ReadI16(Lexer *lexer)
+static i16 ReadI16(Lexer *lexer)
 {
 	String s = ReadString(lexer);
 	long n;
@@ -165,7 +165,7 @@ i16 ReadI16(Lexer *lexer)
 	return (i16)n;
 }
 
-void BeginArray(Lexer *lexer)
+static void BeginArray(Lexer *lexer)
 {
 	Token t = NextToken(lexer);
 
@@ -173,7 +173,7 @@ void BeginArray(Lexer *lexer)
 		Panic("Expected array\n");
 }
 
-bool EndArray(Lexer *lexer)
+static bool EndArray(Lexer *lexer)
 {
 	isize start = lexer->pos;
 	Token t = NextToken(lexer);
@@ -185,7 +185,7 @@ bool EndArray(Lexer *lexer)
 	return false;
 }
 
-Vec3 ReadVec3(Lexer *lexer)
+static Vec3 ReadVec3(Lexer *lexer)
 {
 	Vec3 v;
 
@@ -202,7 +202,7 @@ Vec3 ReadVec3(Lexer *lexer)
 	return v;
 }
 
-void NewAreaLight(Scene *scene, i32 obj_idx, Vec3 color)
+static void NewAreaLight(Scene *scene, i32 obj_idx, Vec3 color)
 {
 	if (scene->light_count >= MAX_LIGHTS)
 		Panic("Too much area lights");

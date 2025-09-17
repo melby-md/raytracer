@@ -1,4 +1,4 @@
-Vec3 CosineWeightedSample(u32 *rng_state)
+static Vec3 CosineWeightedSample(u32 *rng_state)
 {
 	float r1 = Rand(rng_state);
 	float r2 = Rand(rng_state);
@@ -13,7 +13,7 @@ Vec3 CosineWeightedSample(u32 *rng_state)
 	return Vec3{x, y, z};
 }
 
-float CosineWeightedPDF(Vec3 l)
+static float CosineWeightedPDF(Vec3 l)
 {
 	return fmaxf(l.z, 0) / PI;
 }
@@ -21,7 +21,7 @@ float CosineWeightedPDF(Vec3 l)
 /*
  * https://doi.org/10.1111/cgf.14867
  */
-Vec3 GGXVNDFSample(Vec3 v, float alpha, u32 *rng_state)
+static Vec3 GGXVNDFSample(Vec3 v, float alpha, u32 *rng_state)
 {
 	float r1 = Rand(rng_state);
 	float r2 = Rand(rng_state);
@@ -41,7 +41,7 @@ Vec3 GGXVNDFSample(Vec3 v, float alpha, u32 *rng_state)
 
 }
 
-float GGXVNDFPDF(Vec3 v, Vec3 l, float alpha)
+static float GGXVNDFPDF(Vec3 v, Vec3 l, float alpha)
 {
 	Vec3 h = Normalize(v + l);
 
@@ -54,7 +54,7 @@ float GGXVNDFPDF(Vec3 v, Vec3 l, float alpha)
 	return ndf * vis_v / 2;
 }
 
-Vec3 Fresnel(float cosine, Vec3 f0)
+static Vec3 Fresnel(float cosine, Vec3 f0)
 {
 	return f0 + (1 - f0) * powf(1 - cosine, 5);
 }
@@ -97,7 +97,7 @@ Vec3 BSDF(Vec3 v, Vec3 l, Material *mat)
 	return (diffuse + specular) * l.z;
 }
 
-void GetWeights(Material *mat, float *_cosine_weight, float *_vndf_weight)
+static void GetWeights(Material *mat, float *_cosine_weight, float *_vndf_weight)
 {
 	float cosine_weight = 1 - mat->metallic;
 	float vndf_weight = 1;

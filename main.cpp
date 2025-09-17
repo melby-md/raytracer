@@ -6,7 +6,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "raytracer.h"
+#include "common.h"
+
+#include "bsdf.h"
+#include "main.h"
+#include "parser.h"
+
 #include "bsdf.cpp"
 #include "parser.cpp"
 
@@ -26,7 +31,7 @@ struct Hit {
 };
 
 
-float LinearToGamma(float color, float exposure)
+static float LinearToGamma(float color, float exposure)
 {
 	float m = 1 - expf(-color * exposure);
 
@@ -38,7 +43,7 @@ float LinearToGamma(float color, float exposure)
 		return 1.055f * powf(m, 1 / 2.4f) - .055f;
 }
 
-void WriteBMP(const char *file_name, int w, int h, byte *data)
+static void WriteBMP(const char *file_name, int w, int h, byte *data)
 {
 	int filesize = 54 + 3*w*h;
 
@@ -73,7 +78,7 @@ void WriteBMP(const char *file_name, int w, int h, byte *data)
 	fclose(f);
 }
 
-u32 _rand(u32 *rng_state)
+static u32 _rand(u32 *rng_state)
 {
 	// Xorshift32
 	u32 x = *rng_state;
@@ -90,12 +95,12 @@ float Rand(u32 *rng_state)
 	return (float)(_rand(rng_state) >> 8) / (1<<24);
 }
 
-u32 Rand(u32 *rng_state, u32 min, u32 max)
+static u32 Rand(u32 *rng_state, u32 min, u32 max)
 {
 	return _rand(rng_state) % (max - min + 1) + min;
 }
 
-Vec2 RandomDisk(u32 *rng_state) {
+static Vec2 RandomDisk(u32 *rng_state) {
 	for (;;) {
 		float x = Rand(rng_state) * 2 - 1;
 		float y = Rand(rng_state) * 2 - 1;
@@ -105,7 +110,7 @@ Vec2 RandomDisk(u32 *rng_state) {
 	}
 }
 
-Vec3 RandomTriangle(u32 *rng_state)
+static Vec3 RandomTriangle(u32 *rng_state)
 {
 	float r1 = Rand(rng_state);
 	float r2 = Rand(rng_state);
@@ -123,7 +128,7 @@ Vec3 RandomTriangle(u32 *rng_state)
 	return {u, v, 1 - u - v};
 }
 
-void UpdateBounds(BVHTree *tree, i32 index)
+static void UpdateBounds(BVHTree *tree, i32 index)
 {
 	BVHNode *node = &tree->nodes[index];
 	Assert(node->object_count > 0);
@@ -160,7 +165,7 @@ void UpdateBounds(BVHTree *tree, i32 index)
 	}
 }
 
-void BuildBVH(BVHTree *tree, i32 object_count)
+static void BuildBVH(BVHTree *tree, i32 object_count)
 {
 	i32 node_count = 1;
 	BVHNode *node = tree->nodes;
@@ -240,7 +245,7 @@ void BuildBVH(BVHTree *tree, i32 object_count)
 	}
 }
 
-float HitTriangle(Triangle *tri, Ray *ray, float *_u, float *_v)
+static float HitTriangle(Triangle *tri, Ray *ray, float *_u, float *_v)
 {
 	Vec3 e0 = tri->v0 - tri->v2;
 	Vec3 e1 = tri->v1 - tri->v2;
@@ -271,7 +276,7 @@ float HitTriangle(Triangle *tri, Ray *ray, float *_u, float *_v)
 	return INFINITY;
 }
 
-float HitSphere(Sphere *sphere, Ray *ray)
+static float HitSphere(Sphere *sphere, Ray *ray)
 {
 	Vec3 oc = sphere->center - ray->origin;
 	float h = Dot(ray->direction, oc);
@@ -293,7 +298,7 @@ float HitSphere(Sphere *sphere, Ray *ray)
 	return distance;
 }
 
-bool IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax)
+static bool IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax)
 {
 	float tx1 = (bmin.x - ray->origin.x) / ray->direction.x;
 	float tx2 = (bmax.x - ray->origin.x) / ray->direction.x;
@@ -316,7 +321,7 @@ bool IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax)
 	return tmax >= tmin && tmax > 0;
 }
 
-bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
+static bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
 {
 	float min_distance = INFINITY;
 	Vec3 normal, point;
@@ -392,7 +397,7 @@ bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
 	return obj_idx >= 0;
 }
 
-bool Occluded(BVHTree *tree, Ray *ray, float distance)
+static bool Occluded(BVHTree *tree, Ray *ray, float distance)
 {
 	BVHNode *node = tree->nodes;
 	BVHNode *stack[64];
@@ -448,12 +453,12 @@ bool Occluded(BVHTree *tree, Ray *ray, float distance)
 	return false;
 }
 
-float PowerHeuristic(float f_pdf, float g_pdf)
+static float PowerHeuristic(float f_pdf, float g_pdf)
 {
 	return f_pdf*f_pdf / (f_pdf*f_pdf + g_pdf*g_pdf);
 }
 
-float TrianglePDF(Triangle *triangle, Vec3 point, Vec3 triangle_point, Vec3 triangle_normal)
+static float TrianglePDF(Triangle *triangle, Vec3 point, Vec3 triangle_point, Vec3 triangle_normal)
 {
 	Vec3 e0 = triangle->v1 - triangle->v0;
 	Vec3 e1 = triangle->v2 - triangle->v0;
@@ -464,7 +469,7 @@ float TrianglePDF(Triangle *triangle, Vec3 point, Vec3 triangle_point, Vec3 tria
 	return length2 / Dot(triangle_normal, direction) / area;
 }
 
-Vec3 RayTrace(Scene *scene, Ray *_ray, u32 *rng_state)
+static Vec3 RayTrace(Scene *scene, Ray *_ray, u32 *rng_state)
 {
 	Ray ray = *_ray;
 	bool sample_lights = scene->light_count > 0;
