@@ -1,10 +1,11 @@
 #include <errno.h>
+#include <locale.h>
 #include <math.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <stddef.h>
 
 #include "common.h"
 
@@ -585,6 +586,8 @@ static Vec3 RayTrace(Scene *scene, Ray *_ray, u32 *rng_state)
 
 int main(int argc, char **argv)
 {
+	setlocale(LC_NUMERIC, "C");
+
 	static Scene scene;
 
 	if (argc < 2) {
