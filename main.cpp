@@ -298,7 +298,7 @@ static float HitSphere(Sphere *sphere, Ray *ray)
 	return distance;
 }
 
-static bool IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax)
+static float IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax, float max_distance)
 {
 	float tx1 = (bmin.x - ray->origin.x) / ray->direction.x;
 	float tx2 = (bmax.x - ray->origin.x) / ray->direction.x;
@@ -318,7 +318,7 @@ static bool IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax)
 	tmin = fmaxf(tmin, fminf(tz1, tz2));
 	tmax = fminf(tmax, fmaxf(tz1, tz2));
 
-	return tmax >= tmin && tmax > 0;
+	return tmax >= tmin && tmin < max_distance && tmax > 0 ? tmin : INFINITY;
 }
 
 static bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
@@ -373,15 +373,31 @@ static bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
 			BVHNode *child1 = &tree->nodes[node->index];
 			BVHNode *child2 = &tree->nodes[node->index + 1];
 
-			bool isect1 = IntersectAABB(ray, child1->aabb_min, child1->aabb_max);
-			bool isect2 = IntersectAABB(ray, child2->aabb_min, child2->aabb_max);
+			float dist1 = IntersectAABB(ray, child1->aabb_min, child1->aabb_max, min_distance);
+			float dist2 = IntersectAABB(ray, child2->aabb_min, child2->aabb_max, min_distance);
 
-			if (isect1) {
-				node = child1;
-				if (isect2)
-					stack[stack_ptr++] = child2;
-			} else if (isect2) {
-				node = child2;
+			BVHNode *near_child;
+			BVHNode *far_child;
+			float near_dist;
+			float far_dist;
+			if (dist1 < dist2) {
+				near_child = child1;
+				near_dist = dist1;
+				far_child = child2;
+				far_dist = dist2;
+			} else {
+				near_child = child2;
+				near_dist = dist2;
+				far_child = child1;
+				far_dist = dist1;
+			}
+
+			if (near_dist < INFINITY) {
+				node = near_child;
+				if (far_dist < INFINITY)
+					stack[stack_ptr++] = far_child;
+			} else if (far_dist < INFINITY) {
+				node = far_child;
 			} else {
 				if (stack_ptr == 0)
 					break;
@@ -433,8 +449,8 @@ static bool Occluded(BVHTree *tree, Ray *ray, float distance)
 			BVHNode *child1 = &tree->nodes[node->index];
 			BVHNode *child2 = &tree->nodes[node->index + 1];
 
-			bool isect1 = IntersectAABB(ray, child1->aabb_min, child1->aabb_max);
-			bool isect2 = IntersectAABB(ray, child2->aabb_min, child2->aabb_max);
+			bool isect1 = IntersectAABB(ray, child1->aabb_min, child1->aabb_max, distance) < INFINITY;
+			bool isect2 = IntersectAABB(ray, child2->aabb_min, child2->aabb_max, distance) < INFINITY;
 
 			if (isect1) {
 				node = child1;
