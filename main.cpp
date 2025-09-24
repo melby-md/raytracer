@@ -304,20 +304,20 @@ static float IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax, float max_distance)
 	float tx1 = (bmin.x - ray->origin.x) / ray->direction.x;
 	float tx2 = (bmax.x - ray->origin.x) / ray->direction.x;
 
-	float tmin = fminf(tx1, tx2);
-	float tmax = fmaxf(tx1, tx2);
+	float tmin = Min(tx1, tx2);
+	float tmax = Max(tx1, tx2);
 
 	float ty1 = (bmin.y - ray->origin.y) / ray->direction.y;
 	float ty2 = (bmax.y - ray->origin.y) / ray->direction.y;
 
-	tmin = fmaxf(tmin, fminf(ty1, ty2));
-	tmax = fminf(tmax, fmaxf(ty1, ty2));
+	tmin = Max(tmin, Min(ty1, ty2));
+	tmax = Min(tmax, Max(ty1, ty2));
 
 	float tz1 = (bmin.z - ray->origin.z) / ray->direction.z;
 	float tz2 = (bmax.z - ray->origin.z) / ray->direction.z;
 
-	tmin = fmaxf(tmin, fminf(tz1, tz2));
-	tmax = fminf(tmax, fmaxf(tz1, tz2));
+	tmin = Max(tmin, Min(tz1, tz2));
+	tmax = Min(tmax, Max(tz1, tz2));
 
 	return tmax >= tmin && tmin < max_distance && tmax > 0 ? tmin : INFINITY;
 }
@@ -568,7 +568,7 @@ static Vec3 RayTrace(Scene *scene, Ray *_ray, u32 *rng_state)
 		throughput *= sample.bsdf / sample.pdf;
 
 		if (i > 3) {
-			float roulette_prob = fmaxf(throughput.r, fmaxf(throughput.g, throughput.b));
+			float roulette_prob = Max(throughput.r, Max(throughput.g, throughput.b));
 
 			if (Rand(rng_state) < (1 - roulette_prob))
 				break;
@@ -587,7 +587,7 @@ static Vec3 RayTrace(Scene *scene, Ray *_ray, u32 *rng_state)
 int main(int argc, char **argv)
 {
 	setlocale(LC_NUMERIC, "C");
-
+	
 	static Scene scene;
 
 	if (argc < 2) {

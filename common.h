@@ -72,27 +72,35 @@ struct Mat3 {
 
 constexpr float PI = 3.14159265f;
 
+static inline float Min(float a, float b) {
+    return a < b ? a : b;
+}
+
+static inline float Max(float a, float b) {
+    return a > b ? a : b;
+}
+
 static inline Vec3 Min(Vec3 a, Vec3 b)
 {
 	return {
-		fminf(a.x, b.x),
-		fminf(a.y, b.y),
-		fminf(a.z, b.z)
+		Min(a.x, b.x),
+		Min(a.y, b.y),
+		Min(a.z, b.z)
 	};
 }
 
 static inline Vec3 Max(Vec3 a, Vec3 b)
 {
 	return {
-		fmaxf(a.x, b.x),
-		fmaxf(a.y, b.y),
-		fmaxf(a.z, b.z)
+		Max(a.x, b.x),
+		Max(a.y, b.y),
+		Max(a.z, b.z)
 	};
 }
 
 static inline float Clamp(float x, float mn, float mx)
 {
-	return fminf(mx, fmaxf(mn, x));
+	return Min(mx, Max(mn, x));
 }
 
 static inline Vec3 Clamp(Vec3 x, float mn, float mx)

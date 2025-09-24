@@ -15,7 +15,7 @@ static Vec3 CosineWeightedSample(u32 *rng_state)
 
 static float CosineWeightedPDF(Vec3 l)
 {
-	return fmaxf(l.z, 0) / PI;
+	return Max(l.z, 0) / PI;
 }
 
 /*
