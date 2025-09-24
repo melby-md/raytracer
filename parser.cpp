@@ -11,9 +11,23 @@ struct Token {
 };
 
 struct Lexer {
+	const char *file_name;
 	char *input;
 	isize pos;
+	isize prev_pos;
 };
+
+static void ReportError(Lexer *lexer, const char *msg)
+{
+	Log(
+		"ERROR:%s[%ld]: %s\n",
+		lexer->file_name,
+		lexer->prev_pos+1,
+		msg
+	);
+
+	exit(1);
+}
 
 static bool IsSpace(char c)
 {
@@ -82,6 +96,7 @@ static Token NextToken(Lexer *lexer)
 		}
 	} while (type == TOK_NIL);
 
+	lexer->prev_pos = start;
 	return {type, {&lexer->input[start], lexer->pos - start}};
 }
 
@@ -89,17 +104,20 @@ static bool ReadCmd(Lexer *lexer, String *cmd)
 {
 	Token t = NextToken(lexer);
 
+	isize start = lexer->prev_pos;
+
 	if (t.type == TOK_END) {
 		return false;
 	} else if (t.type == TOK_STRING) {
 		if (NextToken(lexer).type != TOK_L_BRACE)
-			Panic("Expected '{'\n");
+			ReportError(lexer, "Expected '{'");
 
 		*cmd = t.lexeme;
+		lexer->prev_pos = start;
 		return true;
 	}
 
-	Panic("Expected command\n");
+	ReportError(lexer, "Expected command");
 	return false;
 }
 
@@ -114,7 +132,7 @@ static bool ReadKey(Lexer *lexer, String *key)
 		return true;
 	}
 
-	Panic("Expected key\n");
+	ReportError(lexer, "Expected key");
 	return false;
 }
 
@@ -126,7 +144,7 @@ static String ReadString(Lexer *lexer)
 		return t.lexeme;
 	}
 
-	Panic("Expected string\n");
+	ReportError(lexer, "Expected string");
 	return {};
 }
 
@@ -145,8 +163,7 @@ static float ReadNumber(Lexer *lexer)
 	String s = ReadString(lexer);
 	float n;
 	if (StringToNumber(s, &n) < 0) {
-		Log("%ld\n", lexer->pos);
-		Panic("Invalid number\n");
+		ReportError(lexer, "Invalid number");
 	}
 	return n;
 }
@@ -159,9 +176,9 @@ static i16 ReadI16(Lexer *lexer)
 	errno = 0;
 	n = strtol(s.data, &end, 10);
 	if (end - s.data != s.length || errno)
-		Panic("Invalid integer\n");
+		ReportError(lexer, "Invalid integer");
 	if (n > (1 << 16) - 1 || n < 0)
-		Panic("Out of bounds integer\n");
+		ReportError(lexer, "Out of bounds integer");
 	return (i16)n;
 }
 
@@ -170,7 +187,7 @@ static void BeginArray(Lexer *lexer)
 	Token t = NextToken(lexer);
 
 	if (t.type != TOK_L_BRACKET)
-		Panic("Expected array\n");
+		ReportError(lexer, "Expected array");
 }
 
 static bool EndArray(Lexer *lexer)
@@ -189,15 +206,17 @@ static Vec3 ReadVec3(Lexer *lexer)
 {
 	Vec3 v;
 
-	if (NextToken(lexer).type != TOK_L_BRACKET)
-		Panic("Expected array\n");
+	Token t = NextToken(lexer);
+	if (t.type != TOK_L_BRACKET)
+		ReportError(lexer, "Expected array");
 
 	v.x = ReadNumber(lexer);
 	v.y = ReadNumber(lexer);
 	v.z = ReadNumber(lexer);
 
-	if (NextToken(lexer).type != TOK_R_BRACKET)
-		Panic("Expected ']'\n");
+	t = NextToken(lexer);
+	if (t.type != TOK_R_BRACKET)
+		ReportError(lexer, "Expected ']'");
 
 	return v;
 }
@@ -254,6 +273,8 @@ void LoadScene(Scene *scene, const char *file)
 	Lexer lexer[1];
 	lexer->input = data;
 	lexer->pos = 0;
+	lexer->prev_pos = 0;
+	lexer->file_name = file;
 
 	i32 material_idx = 0;
 	bool area_light = false;
@@ -284,7 +305,7 @@ void LoadScene(Scene *scene, const char *file)
 				} else if (StringEquals(key, S("center"))) {
 					obj->sphere.center = ReadVec3(lexer);
 				} else {
-					Panic("Unknown key '%.*s'\n", (int)key.length, key.data);
+					ReportError(lexer, "Unknown key");
 				}
 			}
 		} else if (StringEquals(cmd, S("triangle_mesh"))) {
@@ -326,7 +347,7 @@ void LoadScene(Scene *scene, const char *file)
 					}
 
 				} else {
-					Panic("Unknown key '%.*s'\n", (int)key.length, key.data);
+					ReportError(lexer, "Unknown key");
 				}
 			}
 		} else if (StringEquals(cmd, S("material"))) {
@@ -351,7 +372,7 @@ void LoadScene(Scene *scene, const char *file)
 				} else if (StringEquals(key, S("metallic"))) {
 					mat->metallic = ReadNumber(lexer);
 				} else {
-					Panic("Unknown key '%.*s'\n", (int)key.length, key.data);
+					ReportError(lexer, "Unknown key");
 				}
 			}
 		} else if (StringEquals(cmd, S("area_light"))) {
@@ -360,7 +381,7 @@ void LoadScene(Scene *scene, const char *file)
 				if (StringEquals(key, S("color"))) {
 					area_light_color = ReadVec3(lexer);
 				} else {
-					Panic("Unknown key '%.*s'\n", (int)key.length, key.data);
+					ReportError(lexer, "Unknown key");
 				}
 			}
 		} else if (StringEquals(cmd, S("render"))) {
@@ -386,11 +407,11 @@ void LoadScene(Scene *scene, const char *file)
 				} else if (StringEquals(key, S("sky_box_color"))) {
 					scene->sky_box_color = ReadVec3(lexer);
 				} else {
-					Panic("Unknown key '%.*s'\n", (int)key.length, key.data);
+					ReportError(lexer, "Unknown key");
 				}
 			}
 		} else {
-			Panic("Unknown command '%.*s'\n", (int)cmd.length, cmd.data);
+			ReportError(lexer, "Unknown command");
 		}
 	}
 }
