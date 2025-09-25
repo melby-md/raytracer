@@ -17,7 +17,7 @@
 #include "parser.cpp"
 
 struct BVHNode {
-	Vec3 aabb_min, aabb_max;
+	Vec3 aabb[2];
 	i32 index, object_count;
 };
 
@@ -134,8 +134,8 @@ static void UpdateBounds(BVHTree *tree, i32 index)
 	BVHNode *node = &tree->nodes[index];
 	Assert(node->object_count > 0);
 
-	node->aabb_min = V3(INFINITY);
-	node->aabb_max = V3(-INFINITY);
+	node->aabb[0] = V3(INFINITY);
+	node->aabb[1] = V3(-INFINITY);
 
 	i32 last = node->index + node->object_count;
 
@@ -161,8 +161,8 @@ static void UpdateBounds(BVHTree *tree, i32 index)
 			aabb_max = Max(aabb_max, obj->triangle.v2);
 		}
 
-		node->aabb_min = Min(node->aabb_min, aabb_min);
-		node->aabb_max = Max(node->aabb_max, aabb_max);
+		node->aabb[0] = Min(node->aabb[0], aabb_min);
+		node->aabb[1] = Max(node->aabb[1], aabb_max);
 	}
 }
 
@@ -190,13 +190,13 @@ static void BuildBVH(BVHTree *tree, i32 object_count)
 			continue;
 		}
 
-		Vec3 extent = node->aabb_max - node->aabb_min;
+		Vec3 extent = node->aabb[1] - node->aabb[0];
 		int axis = 0;
 		if (extent.y > extent.x)
 			axis = 1;
 		if (extent.z > extent[axis])
 			axis = 2;
-		float split_pos = node->aabb_min[axis] + extent[axis] * .5f;
+		float split_pos = node->aabb[0][axis] + extent[axis] * .5f;
 
 		i32 i = node->index;
 		i32 j = i + node->object_count - 1;
@@ -299,25 +299,31 @@ static float HitSphere(Sphere *sphere, Ray *ray)
 	return distance;
 }
 
-static float IntersectAABB(Ray *ray, Vec3 bmin, Vec3 bmax, float max_distance)
+static float IntersectAABB(Ray *ray, Vec3 *aabb, float max_distance)
 {
-	float tx1 = (bmin.x - ray->origin.x) / ray->direction.x;
-	float tx2 = (bmax.x - ray->origin.x) / ray->direction.x;
+	float tmin = 0.f;
+	float tmax = INFINITY;
 
-	float tmin = Min(tx1, tx2);
-	float tmax = Max(tx1, tx2);
+	bool sign = signbit(ray->direction.x);
+	float tx1 = (aabb[sign].x - ray->origin.x) / ray->direction.x;
+	float tx2 = (aabb[!sign].x - ray->origin.x) / ray->direction.x;
 
-	float ty1 = (bmin.y - ray->origin.y) / ray->direction.y;
-	float ty2 = (bmax.y - ray->origin.y) / ray->direction.y;
+	tmin = Max(tx1, tmin);
+	tmax = Min(tx2, tmax);
 
-	tmin = Max(tmin, Min(ty1, ty2));
-	tmax = Min(tmax, Max(ty1, ty2));
+	sign = signbit(ray->direction.y);
+	float ty1 = (aabb[sign].y - ray->origin.y) / ray->direction.y;
+	float ty2 = (aabb[!sign].y - ray->origin.y) / ray->direction.y;
 
-	float tz1 = (bmin.z - ray->origin.z) / ray->direction.z;
-	float tz2 = (bmax.z - ray->origin.z) / ray->direction.z;
+	tmin = Max(ty1, tmin);
+	tmax = Min(ty2, tmax);
 
-	tmin = Max(tmin, Min(tz1, tz2));
-	tmax = Min(tmax, Max(tz1, tz2));
+	sign = signbit(ray->direction.z);
+	float tz1 = (aabb[sign].z - ray->origin.z) / ray->direction.z;
+	float tz2 = (aabb[!sign].z - ray->origin.z) / ray->direction.z;
+
+	tmin = Max(tz1, tmin);
+	tmax = Min(tz2, tmax);
 
 	return tmax >= tmin && tmin < max_distance && tmax > 0 ? tmin : INFINITY;
 }
@@ -374,8 +380,8 @@ static bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
 			BVHNode *child1 = &tree->nodes[node->index];
 			BVHNode *child2 = &tree->nodes[node->index + 1];
 
-			float dist1 = IntersectAABB(ray, child1->aabb_min, child1->aabb_max, min_distance);
-			float dist2 = IntersectAABB(ray, child2->aabb_min, child2->aabb_max, min_distance);
+			float dist1 = IntersectAABB(ray, child1->aabb, min_distance);
+			float dist2 = IntersectAABB(ray, child2->aabb, min_distance);
 
 			BVHNode *near_child;
 			BVHNode *far_child;
@@ -450,8 +456,8 @@ static bool Occluded(BVHTree *tree, Ray *ray, float distance)
 			BVHNode *child1 = &tree->nodes[node->index];
 			BVHNode *child2 = &tree->nodes[node->index + 1];
 
-			bool isect1 = IntersectAABB(ray, child1->aabb_min, child1->aabb_max, distance) < INFINITY;
-			bool isect2 = IntersectAABB(ray, child2->aabb_min, child2->aabb_max, distance) < INFINITY;
+			bool isect1 = IntersectAABB(ray, child1->aabb, distance) < INFINITY;
+			bool isect2 = IntersectAABB(ray, child2->aabb, distance) < INFINITY;
 
 			if (isect1) {
 				node = child1;
