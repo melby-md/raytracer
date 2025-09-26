@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <float.h>
 #include <locale.h>
 #include <math.h>
 #include <stddef.h>
@@ -134,14 +135,14 @@ static void UpdateBounds(BVHTree *tree, i32 index)
 	BVHNode *node = &tree->nodes[index];
 	Assert(node->object_count > 0);
 
-	node->aabb[0] = V3(INFINITY);
-	node->aabb[1] = V3(-INFINITY);
+	node->aabb[0] = V3(FLT_MAX);
+	node->aabb[1] = V3(-FLT_MAX);
 
 	i32 last = node->index + node->object_count;
 
 	for (i32 i = node->index; i < last; i++) {
-		Vec3 aabb_min = V3(INFINITY);
-		Vec3 aabb_max = V3(-INFINITY);
+		Vec3 aabb_min = V3(FLT_MAX);
+		Vec3 aabb_max = V3(-FLT_MAX);
 
 		Object *obj = &tree->objects[i];
 
@@ -254,17 +255,17 @@ static float HitTriangle(Triangle *tri, Ray *ray, float *_u, float *_v)
 	float det = Dot(e0, pvec);
 
 	if (det > -.0001f && det < .0001f)
-		return INFINITY;
+		return FLT_MAX;
 
 	Vec3 tvec = ray->origin - tri->v2;
 	float u = Dot(tvec, pvec) / det;
 	if (u < 0 || u > 1)
-		return INFINITY;
+		return FLT_MAX;
 
 	Vec3 qvec = Cross(tvec, e0);
 	float v = Dot(ray->direction, qvec) / det;
 	if (v < 0 || u + v > 1)
-		return INFINITY;
+		return FLT_MAX;
 
 	float t = Dot(e1, qvec) / det;
 
@@ -274,7 +275,7 @@ static float HitTriangle(Triangle *tri, Ray *ray, float *_u, float *_v)
 	if (t > .0001f)
 		return t;
 
-	return INFINITY;
+	return FLT_MAX;
 }
 
 static float HitSphere(Sphere *sphere, Ray *ray)
@@ -285,7 +286,7 @@ static float HitSphere(Sphere *sphere, Ray *ray)
 	float delta = h*h - c;
 
 	if (delta < .001f)
-		return INFINITY;
+		return FLT_MAX;
 
 	float sqd = sqrtf(delta);
 	float distance = h - sqd;
@@ -293,7 +294,7 @@ static float HitSphere(Sphere *sphere, Ray *ray)
 	if (distance < .001f) {
 		distance = h + sqd;
 		if (distance < .001f)
-			return INFINITY;
+			return FLT_MAX;
 	}
 
 	return distance;
@@ -302,7 +303,7 @@ static float HitSphere(Sphere *sphere, Ray *ray)
 static float IntersectAABB(Ray *ray, Vec3 *aabb, float max_distance)
 {
 	float tmin = 0.f;
-	float tmax = INFINITY;
+	float tmax = FLT_MAX;
 
 	bool sign = signbit(ray->direction.x);
 	float tx1 = (aabb[sign].x - ray->origin.x) / ray->direction.x;
@@ -325,12 +326,12 @@ static float IntersectAABB(Ray *ray, Vec3 *aabb, float max_distance)
 	tmin = Max(tz1, tmin);
 	tmax = Min(tz2, tmax);
 
-	return tmax >= tmin && tmin < max_distance && tmax > 0 ? tmin : INFINITY;
+	return tmax >= tmin && tmin < max_distance && tmax > 0 ? tmin : FLT_MAX;
 }
 
 static bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
 {
-	float min_distance = INFINITY;
+	float min_distance = FLT_MAX;
 	Vec3 normal, point;
 	i32 obj_idx = -1;
 
@@ -399,11 +400,11 @@ static bool NearestHit(BVHTree *tree, Ray *ray, Hit *hit)
 				far_dist = dist1;
 			}
 
-			if (near_dist < INFINITY) {
+			if (near_dist < FLT_MAX) {
 				node = near_child;
-				if (far_dist < INFINITY)
+				if (far_dist < FLT_MAX)
 					stack[stack_ptr++] = far_child;
-			} else if (far_dist < INFINITY) {
+			} else if (far_dist < FLT_MAX) {
 				node = far_child;
 			} else {
 				if (stack_ptr == 0)
@@ -456,8 +457,8 @@ static bool Occluded(BVHTree *tree, Ray *ray, float distance)
 			BVHNode *child1 = &tree->nodes[node->index];
 			BVHNode *child2 = &tree->nodes[node->index + 1];
 
-			bool isect1 = IntersectAABB(ray, child1->aabb, distance) < INFINITY;
-			bool isect2 = IntersectAABB(ray, child2->aabb, distance) < INFINITY;
+			bool isect1 = IntersectAABB(ray, child1->aabb, distance) < FLT_MAX;
+			bool isect2 = IntersectAABB(ray, child2->aabb, distance) < FLT_MAX;
 
 			if (isect1) {
 				node = child1;
