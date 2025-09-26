@@ -5,3 +5,4 @@ raytracer
 a.out
 *.exe
 *.bmp
+!cornell_box.bmp
