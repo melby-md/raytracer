@@ -10,12 +10,12 @@
 
 #include "common.h"
 
-#include "bsdf.h"
 #include "main.h"
 #include "parser.h"
+#include "shading.h"
 
-#include "bsdf.cpp"
 #include "parser.cpp"
+#include "shading.cpp"
 
 struct BVHNode {
 	Vec3 aabb[2];
@@ -570,7 +570,7 @@ static Vec3 RayTrace(Scene *scene, Ray *_ray, u32 *rng_state)
 			}
 		}
 
-		Sample sample = SampleBSDF(v, &mat, rng_state);
+		BSample sample = SampleBSDF(v, &mat, rng_state);
 
 		throughput *= sample.bsdf / sample.pdf;
 

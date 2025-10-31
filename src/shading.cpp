@@ -13,11 +13,6 @@ static Vec3 CosineWeightedSample(u32 *rng_state)
 	return Vec3{x, y, z};
 }
 
-static float CosineWeightedPDF(Vec3 l)
-{
-	return Max(l.z, 0) / PI;
-}
-
 /*
  * https://doi.org/10.1111/cgf.14867
  */
@@ -54,11 +49,6 @@ static float GGXVNDFPDF(Vec3 v, Vec3 l, float alpha)
 	return ndf * vis_v / 2;
 }
 
-static Vec3 Fresnel(float cosine, Vec3 f0)
-{
-	return f0 + (1 - f0) * powf(1 - cosine, 5);
-}
-
 /*
  * https://jcgt.org/published/0003/02/03/
  * https://google.github.io/filament/Filament.md.html#materialsystem
@@ -85,10 +75,8 @@ Vec3 BSDF(Vec3 v, Vec3 l, Material *mat)
 
 	// Fresnel term
 	Vec3 dielectric_f0 = V3(powf((1 - mat->ior) / (1 + mat->ior), 2));
-
 	Vec3 f0 = Lerp(dielectric_f0, mat->color, mat->metallic);
-
-	Vec3 fresnel = Fresnel(Dot(h, v), f0);
+	Vec3 fresnel = f0 + (1 - f0) * powf(1 - Dot(h, v), 5);
 
 	Vec3 diffuse = (1 - fresnel) * mat->color / PI * (1 - mat->metallic);
 
@@ -118,15 +106,15 @@ float BSDFPDF(Vec3 v, Vec3 l, Material *mat)
 
 	GetWeights(mat, &cosine_weight, &vndf_weight);
 
-	float cosine_pdf = CosineWeightedPDF(l);
+	float cosine_pdf = Max(l.z, 0) / PI;
 	float vndf_pdf = GGXVNDFPDF(v, l, mat->roughness);
 
 	return cosine_pdf * cosine_weight + vndf_pdf * vndf_weight;
 }
 
-Sample SampleBSDF(Vec3 v, Material *mat, u32 *rng_state)
+BSample SampleBSDF(Vec3 v, Material *mat, u32 *rng_state)
 {
-	Sample samp = {};
+	BSample samp = {};
 	float cosine_weight;
 	float vndf_weight;
 
