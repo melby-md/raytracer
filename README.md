@@ -1,6 +1,6 @@
 # Ray Tracer
 
-![Cornell Box rendering](cornell_box.bmp)
+![Cornell Box rendering](cornell_box.png)
 
 An offline path tracing-based renderer written in C++11.
 
