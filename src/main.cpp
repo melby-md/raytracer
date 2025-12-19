@@ -35,9 +35,9 @@ struct Hit {
 
 static float LinearToGamma(float color, float exposure)
 {
-	float m = 1 - expf(-color * exposure);
+	color *= exposure;
 
-	m = Clamp(m, 0, 1);
+	float m = color / (1.f + color);
 
 	if (m <= .0031308f)
 		return m * 12.92f;
