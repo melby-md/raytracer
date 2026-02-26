@@ -11,13 +11,13 @@ Then run:
 
     ./build.sh
 
-To change the compiler, set the `CXX` enviroment variable:
+To change the compiler, set the `-cxx` flag:
 
-    CXX=clang++ ./build.sh
+    ./build.sh -cxx=clang++
 
 To create an optimized build:
 
-    ./build.sh opt
+    ./build.sh -opt
 
 ## Running
 

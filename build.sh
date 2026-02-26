@@ -1,12 +1,13 @@
 #!/bin/sh -e
 cd "$(dirname "$0")"
-: "${CXX:=c++}"
+CXX=c++
 OPT=
 FMATH=
 for arg; do
 	case "$arg" in
-	fmath) FMATH='-ffast-math';;
-	opt)   OPT='-O3 -DOPT';;
+	-fmath) FMATH='-ffast-math';;
+	-opt)   OPT='-O3 -DOPT';;
+	-cxx=*) CXX="${arg#*=}";;
 	esac
 done
 set -x
